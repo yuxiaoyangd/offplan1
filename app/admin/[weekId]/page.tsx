@@ -23,6 +23,7 @@ export default function WeekEditPage() {
   const [loading, setLoading] = useState(true);
   const [slots, setSlots] = useState<TimeSlotRow[]>([]);
   const [limits, setLimits] = useState<Record<string, number>>({});
+  const [stableStartDate, setStableStartDate] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   const weekDays = useMemo(() => {
@@ -41,6 +42,7 @@ export default function WeekEditPage() {
           : Promise.resolve({ data: [], error: null }),
       ]);
       setWeek(weekData ?? null);
+      if (weekData) setStableStartDate(weekData.start_date);
       setSlots(slotsRes.data ?? []);
       if (limitsRes.data) {
         setLimits(limitsRes.data.reduce<Record<string, number>>((acc, r) => { acc[r.rest_date] = r.max_slots; return acc; }, {}));
@@ -61,20 +63,20 @@ export default function WeekEditPage() {
       .channel(`week-edit-${weekId}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "schedule_weeks", filter: `id=eq.${weekId}` }, async () => {
         const { data } = await supabase.from("schedule_weeks").select("*").eq("id", weekId).maybeSingle();
-        if (data) setWeek(data);
+        if (data) { setWeek(data); setStableStartDate(data.start_date); }
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "time_slots", filter: `week_id=eq.${weekId}` }, async () => {
         const { data } = await supabase.from("time_slots").select("*").eq("week_id", weekId).order("sort_order");
         if (data) setSlots(data);
       })
-      .on("postgres_changes", { event: "*", schema: "public", table: "rest_day_limits", filter: week ? `week_start=eq.${week.start_date}` : undefined }, async () => {
-        if (!week) return;
-        const { data } = await supabase.from("rest_day_limits").select("rest_date,max_slots").eq("week_start", week.start_date);
+      .on("postgres_changes", { event: "*", schema: "public", table: "rest_day_limits", filter: stableStartDate ? `week_start=eq.${stableStartDate}` : undefined }, async () => {
+        if (!stableStartDate) return;
+        const { data } = await supabase.from("rest_day_limits").select("rest_date,max_slots").eq("week_start", stableStartDate);
         if (data) setLimits(data.reduce<Record<string, number>>((acc, r) => { acc[r.rest_date] = r.max_slots; return acc; }, {}));
       })
       .subscribe();
     return () => { void supabase.removeChannel(channel); };
-  }, [weekId, week]);
+  }, [weekId, stableStartDate]);
 
   async function saveWeek() {
     if (!week?.start_date || !week?.end_date) { setMessage("请完整填写起止日期。"); return; }
