@@ -77,6 +77,7 @@ export default function AdminPage() {
   const [riderMap, setRiderMap] = useState<Record<string, RiderRow>>({});
   const [teams, setTeams] = useState<ScheduleTeamRow[]>([]);
   const [teamCountsByWeek, setTeamCountsByWeek] = useState<Record<string, number>>({});
+  const [importedWeekIds, setImportedWeekIds] = useState<Set<string>>(() => new Set());
   const [slots, setSlots] = useState<TimeSlotRow[]>([]);
   const [schedules, setSchedules] = useState<RiderScheduleRow[]>([]);
   const [limits, setLimits] = useState<Record<string, number>>({});
@@ -111,6 +112,11 @@ export default function AdminPage() {
     if (!activeWeek) return [];
     return buildDaysFromRange(activeWeek.start_date, activeWeek.end_date);
   }, [activeWeek]);
+
+  const deleteTargetWeek = useMemo(
+    () => weeks.find((week) => week.id === showDeleteConfirm) ?? null,
+    [showDeleteConfirm, weeks],
+  );
 
   const weekRiders = useMemo(() => {
     if (!activeWeek) return [];
@@ -536,9 +542,10 @@ export default function AdminPage() {
   useEffect(() => {
     async function load() {
       setLoadingWeeks(true);
-      const [weeksRes, teamsRes] = await Promise.all([
+      const [weeksRes, teamsRes, snapshotsRes] = await Promise.all([
         supabase.from("schedule_weeks").select("*").order("start_date", { ascending: false }),
         supabase.from("schedule_teams").select("week_id"),
+        supabase.from("week_import_snapshots").select("week_id"),
       ]);
       if (weeksRes.data) {
         setWeeks(weeksRes.data);
@@ -551,6 +558,9 @@ export default function AdminPage() {
           counts[team.week_id] = (counts[team.week_id] ?? 0) + 1;
           return counts;
         }, {}));
+      }
+      if (snapshotsRes.data) {
+        setImportedWeekIds(new Set(snapshotsRes.data.map((snapshot) => snapshot.week_id)));
       }
       setLoadingWeeks(false);
     }
@@ -631,6 +641,10 @@ export default function AdminPage() {
           setTeamCountsByWeek((current) => ({ ...current, [activeWeek.id]: data.length }));
         }
       })
+      .on("postgres_changes", { event: "*", schema: "public", table: "week_import_snapshots" }, async () => {
+        const { data } = await supabase.from("week_import_snapshots").select("week_id");
+        if (data) setImportedWeekIds(new Set(data.map((snapshot) => snapshot.week_id)));
+      })
       .subscribe();
     return () => { void supabase.removeChannel(channel); };
   }, [activeWeek]);
@@ -671,7 +685,14 @@ export default function AdminPage() {
     setSavingWeekId(weekId);
     setMessage(null);
     if (weekId.startsWith("draft-")) {
-      setWeeks((cur) => cur.filter((w) => w.id !== weekId));
+      const remainingWeeks = weeks.filter((week) => week.id !== weekId);
+      setWeeks(remainingWeeks);
+      if (activeWeek?.id === weekId) {
+        const nextWeek = remainingWeeks.find((week) => week.is_active) ?? remainingWeeks[0] ?? null;
+        setActiveWeek(nextWeek);
+        if (nextWeek) localStorage.setItem("admin-selected-week-id", nextWeek.id);
+        else localStorage.removeItem("admin-selected-week-id");
+      }
       setSavingWeekId(null);
       setShowDeleteConfirm(null);
       return;
@@ -680,7 +701,24 @@ export default function AdminPage() {
     const { error } = await supabase.from("schedule_weeks").delete().eq("id", weekId);
     setSavingWeekId(null);
     if (error) { setMessage(error.message); return; }
-    if (activeWeek?.id === weekId) setActiveWeek(null);
+    const remainingWeeks = weeks.filter((week) => week.id !== weekId);
+    setWeeks(remainingWeeks);
+    setImportedWeekIds((current) => {
+      const next = new Set(current);
+      next.delete(weekId);
+      return next;
+    });
+    setTeamCountsByWeek((current) => {
+      const next = { ...current };
+      delete next[weekId];
+      return next;
+    });
+    if (activeWeek?.id === weekId) {
+      const nextWeek = remainingWeeks.find((week) => week.is_active) ?? remainingWeeks[0] ?? null;
+      setActiveWeek(nextWeek);
+      if (nextWeek) localStorage.setItem("admin-selected-week-id", nextWeek.id);
+      else localStorage.removeItem("admin-selected-week-id");
+    }
     setShowDeleteConfirm(null);
     setMessage("排休周已删除。");
   }
@@ -722,12 +760,22 @@ export default function AdminPage() {
           onClose={() => setImportWeek(null)}
           onImported={(importMessage) => {
             setMessage(importMessage);
+            setImportedWeekIds((current) => new Set(current).add(importWeek.id));
             setImportWeek(null);
             if (activeWeek?.id === importWeek.id) {
               setActiveWeek({ ...activeWeek });
             }
           }}
         />
+      ) : null}
+      {exportingWeekId ? (
+        <div className="export-overlay" role="dialog" aria-modal="true" aria-labelledby="export-progress-title">
+          <div className="export-progress">
+            <div className="spinner" aria-hidden="true" />
+            <strong id="export-progress-title">正在导出 XLS</strong>
+            <span>正在整理排班数据并生成文件，请稍候</span>
+          </div>
+        </div>
       ) : null}
       <header className="page-header">
         <h1>后台管理</h1>
@@ -750,7 +798,7 @@ export default function AdminPage() {
           <div className="config-grid">
             {weeks.map((week) => (
               <div
-                className={`config-card ${activeWeek?.id === week.id ? "active-card" : ""}`}
+                className={`config-card week-config-card ${activeWeek?.id === week.id ? "active-card" : ""}`}
                 key={week.id}
                 style={{ position: "relative", cursor: "pointer" }}
                 onClick={(e) => {
@@ -792,7 +840,7 @@ export default function AdminPage() {
                     复制
                   </button>
                 </div>
-                <div className="card-actions-row">
+                <div className="week-card-actions">
                   <button
                     className="btn-primary btn-sm"
                     type="button"
@@ -800,23 +848,24 @@ export default function AdminPage() {
                   >
                     编辑配置
                   </button>
-                  <button
-                    className="btn-ghost btn-sm"
-                    type="button"
-                    disabled={exportingWeekId === week.id}
-                    onClick={(e) => { e.stopPropagation(); void handleXlsExport(week); }}
-                    style={{ color: "var(--text-muted)" }}
-                  >
-                    {exportingWeekId === week.id ? "导出中..." : "导出XLS"}
-                  </button>
-                  <button
-                    className="btn-ghost btn-sm"
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); setImportWeek(week); }}
-                    style={{ color: "var(--text-muted)" }}
-                  >
-                    导入数据
-                  </button>
+                  {importedWeekIds.has(week.id) ? (
+                    <button
+                      className="btn-ghost btn-sm"
+                      type="button"
+                      disabled={exportingWeekId === week.id}
+                      onClick={(e) => { e.stopPropagation(); void handleXlsExport(week); }}
+                    >
+                      {exportingWeekId === week.id ? "导出中..." : "导出 XLS"}
+                    </button>
+                  ) : (
+                    <button
+                      className="btn-ghost btn-sm"
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); setImportWeek(week); }}
+                    >
+                      导入数据
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -1191,12 +1240,30 @@ export default function AdminPage() {
 
       {/* 删除确认弹窗 */}
       {showDeleteConfirm && (
-        <div className="overlay" onClick={() => setShowDeleteConfirm(null)}>
+        <div
+          className="overlay"
+          onClick={() => {
+            if (savingWeekId !== showDeleteConfirm) setShowDeleteConfirm(null);
+          }}
+        >
           <div className="confirm-card" onClick={(e) => e.stopPropagation()}>
             <h2>确认删除</h2>
-            <p style={{ margin: "0 0 20px 0", color: "var(--text-muted)" }}>删除后将无法恢复，确定要删除这个排班周吗？</p>
+            <div className="delete-week-target">
+              <strong>{deleteTargetWeek?.name.trim() || "未命名排班周"}</strong>
+              {deleteTargetWeek ? (
+                <span>{deleteTargetWeek.start_date} ~ {deleteTargetWeek.end_date}</span>
+              ) : null}
+            </div>
+            <p className="delete-week-warning">删除后将无法恢复，确定要删除这个排班周吗？</p>
             <div className="card-actions-row">
-              <button className="btn-ghost" type="button" onClick={() => setShowDeleteConfirm(null)}>取消</button>
+              <button
+                className="btn-ghost"
+                type="button"
+                onClick={() => setShowDeleteConfirm(null)}
+                disabled={savingWeekId === showDeleteConfirm}
+              >
+                取消
+              </button>
               <button
                 className="btn-primary btn-danger"
                 type="button"

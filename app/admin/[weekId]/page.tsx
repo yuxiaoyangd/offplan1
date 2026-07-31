@@ -265,8 +265,7 @@ export default function WeekEditPage() {
       </section>
 
       {/* 时段与排班规则 */}
-      {slots.length > 0 ? (
-        <section className="admin-section">
+      <section className="admin-section">
           <div className="section-header">
             <div>
               <h2>时段与排班规则</h2>
@@ -302,8 +301,9 @@ export default function WeekEditPage() {
               <strong>{week.default_slot_ids?.length ?? 0}/{week.required_slots ?? 3}</strong>
             </div>
           </div>
-          <div className="slot-config-grid">
-            {slots.map((slot) => (
+          {slots.length > 0 ? (
+            <div className="slot-config-grid">
+              {slots.map((slot) => (
               <div className={`slot-config-item ${week.default_slot_ids?.includes(slot.id) ? "default-active" : ""}`} key={slot.id}>
                 <div className="slot-config-copy">
                   <strong>{slot.name}</strong>
@@ -324,10 +324,15 @@ export default function WeekEditPage() {
                   </button>
                 </div>
               </div>
-            ))}
-          </div>
-        </section>
-      ) : null}
+              ))}
+            </div>
+          ) : (
+            <div className="slot-config-empty">
+              <strong>暂无可配置时段</strong>
+              <span>需先导入骑手时段意愿 XLS 文件</span>
+            </div>
+          )}
+      </section>
 
       {/* 分小队每日休息名额 */}
       {weekDays.length > 0 && teams.length > 0 ? (

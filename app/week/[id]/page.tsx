@@ -67,6 +67,7 @@ export default function WeekSchedulePage() {
   const [showNameGate, setShowNameGate] = useState(false);
   const [draftMode, setDraftMode] = useState<"random" | "specified" | null>(null);
   const [confirmRandom, setConfirmRandom] = useState(false);
+  const [confirmSpecified, setConfirmSpecified] = useState(false);
   const [selectedRestDate, setSelectedRestDate] = useState("");
   const [uniformSlotIds, setUniformSlotIds] = useState<string[]>([]);
   const [schedulesLoaded, setSchedulesLoaded] = useState(false);
@@ -313,6 +314,7 @@ export default function WeekSchedulePage() {
       p_slot_ids: uniformSlotIds,
     });
     setSubmittingKey(null);
+    setConfirmSpecified(false);
     const result = data as RpcResult | null;
     if (error || result?.success === false) {
       setMessage(error?.message ?? result?.message ?? "提交失败");
@@ -320,6 +322,18 @@ export default function WeekSchedulePage() {
     }
     await refreshRiderSchedules();
     setMessage("指定排休和出勤时段已保存");
+  }
+
+  function requestSpecifiedConfirmation() {
+    if (!selectedRestDate) {
+      setMessage("请选择一天排休");
+      return;
+    }
+    if (uniformSlotIds.length !== requiredSlots) {
+      setMessage(`请选择 ${requiredSlots} 个统一出勤时段`);
+      return;
+    }
+    setConfirmSpecified(true);
   }
 
   if (weekLoading) {
@@ -341,6 +355,7 @@ export default function WeekSchedulePage() {
 
   const mode = rider?.rest_preference_mode;
   const specifiedRestDay = weekDays.find((day) => day.key === existingRestDate);
+  const selectedRestDay = weekDays.find((day) => day.key === selectedRestDate);
   const hasFixedSubmit = Boolean(
     rider
     && schedulesLoaded
@@ -362,6 +377,36 @@ export default function WeekSchedulePage() {
               <button className="btn-secondary" type="button" onClick={() => setConfirmRandom(false)} disabled={submittingKey === "random"}>取消</button>
               <button className="btn-primary" type="button" onClick={submitRandomPreference} disabled={submittingKey === "random"}>
                 {submittingKey === "random" ? "提交中..." : "确定提交"}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {confirmSpecified ? (
+        <div className="confirm-overlay">
+          <section className="confirm-card employee-confirm-card">
+            <h3>确认提交指定排休？</h3>
+            <div className="specified-confirm-summary">
+              <div>
+                <span>排休日</span>
+                <strong>
+                  {selectedRestDay?.weekdayLabel ?? "已选择"}
+                  {selectedRestDay?.shortDate
+                    ? ` · ${selectedRestDay.shortDate}`
+                    : ""}
+                </strong>
+              </div>
+              <div>
+                <span>出勤时段</span>
+                <strong>{uniformSlotIds.map((id) => slotMap[id]?.name).filter(Boolean).join("、")}</strong>
+              </div>
+            </div>
+            <p className="confirm-copy">提交后不可更改。</p>
+            <div className="confirm-actions">
+              <button className="btn-secondary" type="button" onClick={() => setConfirmSpecified(false)} disabled={submittingKey === "specified"}>取消</button>
+              <button className="btn-primary" type="button" onClick={submitSpecifiedSchedule} disabled={submittingKey === "specified"}>
+                {submittingKey === "specified" ? "提交中..." : "确定提交"}
               </button>
             </div>
           </section>
@@ -410,7 +455,7 @@ export default function WeekSchedulePage() {
           <div className="random-shift-summary">
             出勤时段：{uniformSlotIds.map((id) => slotMap[id]?.name).filter(Boolean).join("、") || "已提交"}
           </div>
-          <div className="locked-note">随机排休已确认，不可更改</div>
+          <div className="submitted-note">已选择随机排休</div>
         </section>
       ) : null}
 
@@ -561,7 +606,7 @@ export default function WeekSchedulePage() {
             <button
               className="btn-primary submit-preference"
               type="button"
-              onClick={submitSpecifiedSchedule}
+              onClick={requestSpecifiedConfirmation}
               disabled={submittingKey === "specified" || !selectedRestDate || uniformSlotIds.length !== requiredSlots}
             >
               {submittingKey === "specified" ? "提交中..." : "确定提交"}
