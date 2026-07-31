@@ -320,7 +320,7 @@ export default function WeekEditPage() {
                     disabled={!slot.is_selectable}
                     onClick={() => toggleDefaultSlot(slot.id)}
                   >
-                    {week.default_slot_ids?.includes(slot.id) ? "取消默认" : "默认"}
+                    {week.default_slot_ids?.includes(slot.id) ? "取消默认" : "设为默认"}
                   </button>
                 </div>
               </div>
