@@ -19,12 +19,21 @@ const DEFAULT_WEEKDAY_LIMIT = 5;
 const DEFAULT_WEEKEND_LIMIT = 2;
 
 type BulkActionType = "apply-default" | "apply-slot" | "set-rest" | "clear-rest" | "clear-schedules";
-type QuickFilterKey = "noRest" | "incomplete" | "untouched";
+type QuickFilterKey = "random" | "unselected" | "noRest" | "incomplete" | "untouched";
 type RiderStatus = {
   hasRest: boolean;
   missingDays: number;
   totalSelected: number;
   totalEntries: number;
+  preferenceMode: RiderRow["rest_preference_mode"];
+};
+
+const QUICK_FILTER_LABELS: Record<QuickFilterKey, string> = {
+  random: "随机待安排",
+  unselected: "未选择待安排",
+  noRest: "缺排休",
+  incomplete: "时段不足",
+  untouched: "未生成",
 };
 
 function areStringSetsEqual(a: Set<string>, b: Set<string>): boolean {
@@ -54,7 +63,7 @@ function createDraftWeek(): ScheduleWeekRow {
     name: "",
     start_date: formatDateKey(monday),
     end_date: formatDateKey(sunday),
-    is_active: false,
+    is_active: true,
     required_slots: 3,
     default_slot_ids: null,
   };
@@ -78,6 +87,10 @@ export default function AdminPage() {
   const [bulkRestDate, setBulkRestDate] = useState("");
   const [bulkLoading, setBulkLoading] = useState(false);
   const [pendingAction, setPendingAction] = useState<BulkActionType | null>(null);
+  const [showAdvancedTools, setShowAdvancedTools] = useState(false);
+  const [showCompleteConfirm, setShowCompleteConfirm] = useState(false);
+  const [showClearSchedulesConfirm, setShowClearSchedulesConfirm] = useState(false);
+  const [completeLoading, setCompleteLoading] = useState(false);
 
   const [savingWeekId, setSavingWeekId] = useState<string | null>(null);
   const [showPendingOnly, setShowPendingOnly] = useState(false);
@@ -140,9 +153,11 @@ export default function AdminPage() {
         const entries = riderDayMap?.get(dayKey) ?? [];
         const restEntry = entries.find((item) => item.slot_id === null);
         if (restEntry) hasRest = true;
-        const selectedCount = entries.filter((item) => item.slot_id !== null && item.is_selected).length;
+        const selectedCount = entries.filter(
+          (item) => item.slot_id !== null && item.is_selected && selectableSlotIds.has(item.slot_id),
+        ).length;
         totalSelected += selectedCount;
-        if (!restEntry && selectedCount === 0) {
+        if (!restEntry && selectedCount < (activeWeek?.required_slots ?? 0)) {
           missingDays += 1;
         }
       }
@@ -151,10 +166,11 @@ export default function AdminPage() {
         missingDays,
         totalSelected,
         totalEntries: dayKeys.length,
+        preferenceMode: rider.rest_preference_mode,
       };
     }
     return result;
-  }, [scheduleByRider, weekDays, weekRiders]);
+  }, [activeWeek?.required_slots, scheduleByRider, selectableSlotIds, weekDays, weekRiders]);
 
   const groups = useMemo(() => {
     return teams.map((team) => ({ id: team.id, name: team.name }));
@@ -223,6 +239,8 @@ export default function AdminPage() {
 
   const riderIdsByFilter = useMemo<Record<QuickFilterKey, string[]>>(() => {
     const result: Record<QuickFilterKey, string[]> = {
+      random: [],
+      unselected: [],
       noRest: [],
       incomplete: [],
       untouched: [],
@@ -230,6 +248,12 @@ export default function AdminPage() {
     for (const rider of weekRiders) {
       const status = riderStatusMap[rider.rider_id];
       if (!status) continue;
+      if (status.preferenceMode === "random" && !status.hasRest) {
+        result.random.push(rider.rider_id);
+      }
+      if (!status.preferenceMode && !status.hasRest) {
+        result.unselected.push(rider.rider_id);
+      }
       if (!status.hasRest) {
         result.noRest.push(rider.rider_id);
       }
@@ -309,6 +333,10 @@ export default function AdminPage() {
     masterSelectRef.current.checked = selectedRiderIds.size > 0 && selectedRiderIds.size === totalRows && totalRows > 0;
     masterSelectRef.current.indeterminate = selectedRiderIds.size > 0 && selectedRiderIds.size < totalRows;
   }, [filteredRequestSummaries.length, selectedRiderIds]);
+
+  useEffect(() => {
+    setShowAdvancedTools(false);
+  }, [activeWeek?.id]);
 
   const handleBulkAction = useCallback(async (action: BulkActionType) => {
     if (!activeWeek) return;
@@ -390,6 +418,60 @@ export default function AdminPage() {
       setBulkRestDate("");
     }
   }, [activeWeek, bulkRestDate, resetSelection, selectedRiderIds, applySlotId, slotMap]);
+
+  function requestClearSchedules() {
+    if (selectedRiderIds.size === 0) {
+      setMessage("请选择至少一位骑手");
+      return;
+    }
+    setShowClearSchedulesConfirm(true);
+  }
+
+  async function confirmClearSchedules() {
+    await handleBulkAction("clear-schedules");
+    setShowClearSchedulesConfirm(false);
+  }
+
+  function requestCompleteWeek() {
+    if (!activeWeek) return;
+    if (weekRiders.length === 0) {
+      setMessage("当前排班周没有骑手，请先导入数据");
+      return;
+    }
+    const validSlotIds = new Set(selectableSlots.map((slot) => slot.id));
+    const validDefaults = (activeWeek.default_slot_ids ?? []).filter((slotId) => validSlotIds.has(slotId));
+    if ((activeWeek.required_slots ?? 0) > validDefaults.length) {
+      setMessage("默认时段不足，请先到“编辑配置”中设置足够的默认时段");
+      return;
+    }
+    setShowCompleteConfirm(true);
+  }
+
+  async function handleCompleteWeek() {
+    if (!activeWeek || completeLoading) return;
+    setCompleteLoading(true);
+    setMessage(null);
+    const { data, error } = await supabase.rpc("complete_week_schedules", {
+      p_week_id: activeWeek.id,
+    });
+    setCompleteLoading(false);
+    setShowCompleteConfirm(false);
+
+    if (error || data?.success === false) {
+      setMessage(error?.message ?? data?.message ?? "自动补全排班失败");
+      return;
+    }
+
+    const { data: latestSchedules } = await supabase
+      .from("rider_schedules")
+      .select("*")
+      .eq("week_id", activeWeek.id);
+    if (latestSchedules) setSchedules(latestSchedules);
+
+    const unassigned = Number(data?.restUnassigned ?? 0);
+    const summary = `已安排排休 ${Number(data?.restAssigned ?? 0)} 人，补充 ${Number(data?.slotsAdded ?? 0)} 个时段`;
+    setMessage(unassigned > 0 ? `${summary}；仍有 ${unassigned} 人因名额不足未安排排休` : summary);
+  }
 
   async function handleXlsExport(week: ScheduleWeekRow) {
     setExportingWeekId(week.id);
@@ -614,7 +696,7 @@ export default function AdminPage() {
       name: newWeekName.trim(),
       start_date: newWeekStart,
       end_date: newWeekEnd,
-      is_active: false,
+      is_active: true,
       required_slots: 3,
     }).select().single();
     setCreating(false);
@@ -633,7 +715,7 @@ export default function AdminPage() {
   }
 
   return (
-    <main className="page-container">
+    <main className="page-container admin-page">
       {importWeek ? (
         <ImportWeekDialog
           week={importWeek}
@@ -765,7 +847,7 @@ export default function AdminPage() {
 
           {requestSummaries.length > 0 ? (
             <>
-              <div className="bulk-panel">
+              <div className={`bulk-panel ${showAdvancedTools ? "expanded" : "collapsed"}`}>
                 <div className="bulk-panel-top">
                   <div className="selection-meta">
                     <div>
@@ -777,13 +859,15 @@ export default function AdminPage() {
                         type="button"
                         onClick={() => applyQuickFilter(quickFilter)}
                       >
-                        {quickFilter === "noRest" ? "缺排休" : quickFilter === "incomplete" ? "时段不足" : "未生成"}
+                        {QUICK_FILTER_LABELS[quickFilter]}
                       </button>
                     ) : null}
                     <button className="btn-secondary btn-sm" type="button" onClick={resetSelection} disabled={selectedRiderArray.length === 0}>清除选择</button>
                   </div>
                   <div className="filter-chips">
                     {([
+                      { key: "random", label: "随机待安排" },
+                      { key: "unselected", label: "未选择待安排" },
                       { key: "noRest", label: "缺排休" },
                       { key: "incomplete", label: "时段不足" },
                       { key: "untouched", label: "未生成" },
@@ -808,6 +892,24 @@ export default function AdminPage() {
                         const status = riderStatusMap[r.rider_id];
                         return !status || status.missingDays > 0;
                       }).length}）</small>
+                    </button>
+                  </div>
+                  <div className="admin-tools-actions">
+                    <button
+                      className="btn-primary btn-sm"
+                      type="button"
+                      onClick={requestCompleteWeek}
+                      disabled={completeLoading}
+                    >
+                      {completeLoading ? "处理中..." : "自动补全排班"}
+                    </button>
+                    <button
+                      className="btn-secondary btn-sm"
+                      type="button"
+                      aria-expanded={showAdvancedTools}
+                      onClick={() => setShowAdvancedTools((current) => !current)}
+                    >
+                      {showAdvancedTools ? "收起" : "展开更多"}
                     </button>
                   </div>
                 </div>
@@ -924,7 +1026,7 @@ export default function AdminPage() {
                       <button
                         className="btn-secondary btn-sm"
                         type="button"
-                        onClick={() => void handleBulkAction("clear-schedules")}
+                        onClick={requestClearSchedules}
                         disabled={bulkLoading}
                       >
                         {pendingAction === "clear-schedules" ? "处理中..." : "清空排班"}
@@ -939,7 +1041,7 @@ export default function AdminPage() {
                 <table className="admin-table">
                   <thead>
                     <tr>
-                      <th style={{ width: "42px" }}>
+                      <th style={{ width: "44px" }}>
                         <input
                           ref={masterSelectRef}
                           type="checkbox"
@@ -990,7 +1092,15 @@ export default function AdminPage() {
                             </span>
                             {status ? (
                               <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>
-                                {status.hasRest ? "已有排休" : "缺排休"} · {status.totalSelected}/{status.totalEntries * (activeWeek?.required_slots ?? 0)} 时段
+                                {status.preferenceMode === "random"
+                                  ? status.hasRest ? "随机排休 · 已安排" : "随机排休 · 待安排"
+                                  : status.preferenceMode === "specified"
+                                    ? "指定排休"
+                                    : "尚未选择"}
+                                {" · "}
+                                {status.hasRest ? "已有排休" : "缺排休"}
+                                {" · "}
+                                {status.totalSelected}/{status.totalEntries * (activeWeek?.required_slots ?? 0)} 时段
                               </span>
                             ) : null}
                           </div>
@@ -1002,7 +1112,15 @@ export default function AdminPage() {
                           if (state === "未生成" || state === "未选") cls = "missing";
                           return (
                             <td key={i}>
-                              <span className={`status-badge ${cls}`}>{state}</span>
+                              {cls === "work" ? (
+                                <div className="shift-badges" title={state}>
+                                  {state.split("、").map((slotName, slotIndex) => (
+                                    <span className="status-badge work" key={`${slotName}-${slotIndex}`}>{slotName}</span>
+                                  ))}
+                                </div>
+                              ) : (
+                                <span className={`status-badge ${cls}`}>{state}</span>
+                              )}
                             </td>
                           );
                         })}
@@ -1019,6 +1137,57 @@ export default function AdminPage() {
           ) : null}
         </section>
       ) : null}
+
+      {showCompleteConfirm && (
+        <div className="overlay" onClick={() => { if (!completeLoading) setShowCompleteConfirm(false); }}>
+          <div className="confirm-card" onClick={(event) => event.stopPropagation()}>
+            <h2>确认自动补全排班</h2>
+            <p className="complete-confirm-copy">
+              系统将保留已有选择，用默认时段补足每天缺少的数量，并按各小队剩余名额为所有缺少排休的骑手自动安排休息日。
+            </p>
+            <div className="card-actions-row">
+              <button className="btn-ghost" type="button" onClick={() => setShowCompleteConfirm(false)} disabled={completeLoading}>取消</button>
+              <button className="btn-primary" type="button" onClick={() => void handleCompleteWeek()} disabled={completeLoading}>
+                {completeLoading ? "处理中..." : "确认补全"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showClearSchedulesConfirm && (
+        <div
+          className="overlay"
+          onClick={() => {
+            if (!bulkLoading) setShowClearSchedulesConfirm(false);
+          }}
+        >
+          <div className="confirm-card" onClick={(event) => event.stopPropagation()}>
+            <h2>确认清空排班</h2>
+            <p className="complete-confirm-copy">
+              确定清空已选 {selectedRiderIds.size} 位骑手的本周排班吗？排休和出勤时段都将被删除，且无法撤销。
+            </p>
+            <div className="card-actions-row">
+              <button
+                className="btn-ghost"
+                type="button"
+                onClick={() => setShowClearSchedulesConfirm(false)}
+                disabled={bulkLoading}
+              >
+                取消
+              </button>
+              <button
+                className="btn-primary btn-danger"
+                type="button"
+                onClick={() => void confirmClearSchedules()}
+                disabled={bulkLoading}
+              >
+                {pendingAction === "clear-schedules" ? "清空中..." : "确认清空"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 删除确认弹窗 */}
       {showDeleteConfirm && (

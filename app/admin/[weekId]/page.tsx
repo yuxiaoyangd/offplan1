@@ -136,8 +136,14 @@ export default function WeekEditPage() {
     setMessage("排休周已保存。");
   }
 
-  async function toggleSlotSelectable(slotId: string) {
-    const { error } = await supabase.rpc("toggle_slot_selectable", { p_slot_id: slotId });
+  async function toggleSlotSelectable(slot: TimeSlotRow) {
+    const nextSelectable = !slot.is_selectable;
+    if (!nextSelectable && week?.default_slot_ids?.includes(slot.id)) {
+      const nextDefaults = week.default_slot_ids.filter((id) => id !== slot.id);
+      setWeek((current) => current ? { ...current, default_slot_ids: nextDefaults } : null);
+      await setWeekDefaultSlots(nextDefaults);
+    }
+    const { error } = await supabase.rpc("toggle_slot_selectable", { p_slot_id: slot.id });
     if (error) setMessage(error.message);
   }
 
@@ -153,6 +159,19 @@ export default function WeekEditPage() {
   async function setWeekDefaultSlots(defaultSlotIds: string[]) {
     const { error } = await supabase.rpc("set_week_default_slots", { p_week_id: weekId, p_default_slot_ids: defaultSlotIds });
     if (error) setMessage(error.message);
+  }
+
+  function toggleDefaultSlot(slotId: string) {
+    if (!week) return;
+    const currentIds = week.default_slot_ids ?? [];
+    const isSelected = currentIds.includes(slotId);
+    if (!isSelected && currentIds.length >= (week.required_slots ?? 0)) {
+      setMessage(`默认时段最多选择 ${week.required_slots ?? 0} 个`);
+      return;
+    }
+    const nextIds = isSelected ? currentIds.filter((id) => id !== slotId) : [...currentIds, slotId];
+    setWeek({ ...week, default_slot_ids: nextIds });
+    void setWeekDefaultSlots(nextIds);
   }
 
   async function saveAllLimits() {
@@ -200,7 +219,7 @@ export default function WeekEditPage() {
   }
 
   return (
-    <main className="page-container">
+    <main className="page-container admin-page config-page">
       <header className="page-header">
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
           <button className="btn-ghost btn-sm" type="button" onClick={() => router.push("/admin")}>← 返回</button>
@@ -215,142 +234,97 @@ export default function WeekEditPage() {
         <div className="section-header">
           <div>
             <h2>日期配置</h2>
-            <p>设置排休周的名称、起止日期和状态</p>
+            <p>排班周基本信息</p>
           </div>
         </div>
-        <div className="config-card" style={{ maxWidth: "600px" }}>
-          <div className="input-group">
-            <label style={{ fontSize: "14px", fontWeight: 600, marginBottom: "8px", display: "block" }}>排班名称</label>
+        <div className="week-basics-grid">
+          <label className="config-field">
+            <span>排班名称</span>
             <input type="text" className="clean-input" value={week.name}
               onChange={(e) => setWeek((cur) => cur ? { ...cur, name: e.target.value } : null)} placeholder="例如：第一周、A队排班等" />
-          </div>
-          <div className="input-group">
-            <label style={{ fontSize: "14px", fontWeight: 600, marginBottom: "8px", display: "block" }}>开始日期</label>
+          </label>
+          <label className="config-field">
+            <span>开始日期</span>
             <input type="date" className="clean-input" value={week.start_date}
               onChange={(e) => setWeek((cur) => cur ? { ...cur, start_date: e.target.value } : null)} />
-          </div>
-          <div className="input-group">
-            <label style={{ fontSize: "14px", fontWeight: 600, marginBottom: "8px", display: "block" }}>结束日期</label>
+          </label>
+          <label className="config-field">
+            <span>结束日期</span>
             <input type="date" className="clean-input" value={week.end_date}
               onChange={(e) => setWeek((cur) => cur ? { ...cur, end_date: e.target.value } : null)} />
-          </div>
-          <label className="switch-label" style={{ marginTop: "8px" }}>
+          </label>
+          <label className="switch-label publish-switch">
             <input type="checkbox" checked={week.is_active}
               onChange={(e) => setWeek((cur) => cur ? { ...cur, is_active: e.target.checked } : null)} />
             发布此周
           </label>
-          <div className="card-actions-row" style={{ marginTop: "16px" }}>
-            <button className="btn-primary" type="button" onClick={saveWeek}>保存</button>
-          </div>
+        </div>
+        <div className="config-section-actions">
+          <button className="btn-primary btn-sm" type="button" onClick={saveWeek}>保存日期配置</button>
         </div>
       </section>
 
-      {/* 时段配置 */}
+      {/* 时段与排班规则 */}
       {slots.length > 0 ? (
         <section className="admin-section">
           <div className="section-header">
             <div>
-              <h2>时段配置</h2>
-              <p>标记「可选」的时段骑手可在端上自由选择</p>
+              <h2>时段与排班规则</h2>
+              <p>统一管理可选时段、每天必选数量和默认时段</p>
             </div>
           </div>
-          <div className="config-grid">
-            {slots.map((slot) => (
-              <div className="config-card" key={slot.id} style={{ flexDirection: "row", alignItems: "center" }}>
-                <div style={{ flex: 1 }}>
-                  <strong>{slot.name}</strong>
-                  <span style={{ fontSize: "12px", color: "var(--text-muted)", display: "block" }}>{slot.start_time.slice(0, 5)}-{slot.end_time.slice(0, 5)}</span>
-                </div>
-                <label className="switch-label" style={{ cursor: "pointer" }}>
-                  <input type="checkbox" checked={slot.is_selectable} onChange={() => toggleSlotSelectable(slot.id)} />
-                  可选
-                </label>
-              </div>
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      {/* 每周必须选时段数 */}
-      {slots.length > 0 ? (
-        <section className="admin-section">
-          <div className="section-header">
-            <div>
-              <h2>排班要求</h2>
-              <p>规定每人每天必须选几个时段</p>
-            </div>
-          </div>
-          <div className="config-card" style={{ flexDirection: "row", alignItems: "center", maxWidth: "400px" }}>
-            <div style={{ flex: 1 }}>
-              <strong>每人每天必须选</strong>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+          <div className="slot-policy-bar">
+            <label className="required-slot-control">
+              <span>每人每天必须选</span>
               <input className="clean-input" type="number" min={0} max={10} value={week.required_slots ?? 3}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setWeek((cur) => cur ? { ...cur, required_slots: value === "" ? 0 : Number(value) } : null);
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setWeek((current) => current ? { ...current, required_slots: value === "" ? 0 : Number(value) } : null);
                 }}
-                onBlur={(e) => {
-                  const value = Number(e.target.value);
+                onBlur={(event) => {
+                  const value = Number(event.target.value);
                   if (!Number.isInteger(value) || value < 0 || value > 10) {
-                    setWeek((cur) => cur ? { ...cur, required_slots: 3 } : null);
+                    setWeek((current) => current ? { ...current, required_slots: 3 } : null);
                     setMessage("必选时段数需在 0 到 10 之间");
                     return;
                   }
+                  const trimmedDefaults = (week.default_slot_ids ?? []).slice(0, value);
+                  setWeek((current) => current ? { ...current, required_slots: value, default_slot_ids: trimmedDefaults } : null);
                   void setWeekRequiredSlots(value);
-                }}
-                style={{ width: "60px", padding: "6px", textAlign: "center" }} />
-              <span style={{ fontSize: "13px", color: "var(--text-muted)" }}>个时段</span>
+                  if (trimmedDefaults.length !== (week.default_slot_ids ?? []).length) {
+                    void setWeekDefaultSlots(trimmedDefaults);
+                  }
+                }} />
+              <span>个时段</span>
+            </label>
+            <div className="default-slot-status">
+              <span>默认时段</span>
+              <strong>{week.default_slot_ids?.length ?? 0}/{week.required_slots ?? 3}</strong>
             </div>
           </div>
-        </section>
-      ) : null}
-
-      {/* 默认时段选择 */}
-      {slots.length > 0 ? (
-        <section className="admin-section">
-          <div className="section-header">
-            <div>
-              <h2>默认时段选择</h2>
-              <p>设置员工自动选中的默认时段（仅从可选时段中选择）</p>
-            </div>
-          </div>
-          <div className="config-card" style={{ maxWidth: "600px" }}>
-            <div style={{ marginBottom: "12px", fontSize: "13px", color: "var(--text-muted)" }}>
-              已选 {week.default_slot_ids?.length ?? 0}/{week.required_slots ?? 3} 个默认时段
-            </div>
-            <div className="config-grid">
-              {slots.filter(s => s.is_selectable).map((slot) => {
-                const isSelected = week.default_slot_ids?.includes(slot.id) ?? false;
-                return (
+          <div className="slot-config-grid">
+            {slots.map((slot) => (
+              <div className={`slot-config-item ${week.default_slot_ids?.includes(slot.id) ? "default-active" : ""}`} key={slot.id}>
+                <div className="slot-config-copy">
+                  <strong>{slot.name}</strong>
+                  <span>{slot.start_time.slice(0, 5)}-{slot.end_time.slice(0, 5)}</span>
+                </div>
+                <div className="slot-config-actions">
+                  <label className="switch-label">
+                    <input type="checkbox" checked={slot.is_selectable} onChange={() => void toggleSlotSelectable(slot)} />
+                    可选
+                  </label>
                   <button
-                    className={`config-card ${isSelected ? "active-card" : ""} selectable-card`}
-                    key={slot.id}
+                    className={`default-slot-toggle ${week.default_slot_ids?.includes(slot.id) ? "active" : ""}`}
                     type="button"
-                    onClick={() => {
-                      const currentIds = week.default_slot_ids ?? [];
-                      const newIds = isSelected
-                        ? currentIds.filter(id => id !== slot.id)
-                        : [...currentIds, slot.id];
-                      setWeek((cur) => cur ? { ...cur, default_slot_ids: newIds } : null);
-                      void setWeekDefaultSlots(newIds);
-                    }}
+                    disabled={!slot.is_selectable}
+                    onClick={() => toggleDefaultSlot(slot.id)}
                   >
-                    <div style={{ flex: 1, textAlign: "left" }}>
-                      <strong>{slot.name}</strong>
-                      <span style={{ fontSize: "12px", color: "var(--text-muted)", display: "block" }}>
-                        {slot.start_time.slice(0, 5)}-{slot.end_time.slice(0, 5)}
-                      </span>
-                    </div>
-                    {isSelected ? (
-                      <span className="selection-check" aria-hidden="true">✓</span>
-                    ) : (
-                      <span className="selection-hint">点击选择</span>
-                    )}
+                    {week.default_slot_ids?.includes(slot.id) ? "取消默认" : "默认"}
                   </button>
-                );
-              })}
-            </div>
+                </div>
+              </div>
+            ))}
           </div>
         </section>
       ) : null}
@@ -363,7 +337,6 @@ export default function WeekEditPage() {
               <h2>小队排休名额</h2>
               <p>{teams.length === 1 && teams[0].is_default ? "当前使用默认小队" : `已识别 ${teams.length} 个小队`}，名额按小队分别计算</p>
             </div>
-            <button className="btn-primary btn-sm" type="button" onClick={saveAllLimits}>保存名额</button>
           </div>
           <div className="quota-table-wrap">
             <table className="quota-table">
@@ -413,6 +386,9 @@ export default function WeekEditPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+          <div className="config-section-actions">
+            <button className="btn-primary btn-sm" type="button" onClick={saveAllLimits}>保存名额</button>
           </div>
         </section>
       ) : null}

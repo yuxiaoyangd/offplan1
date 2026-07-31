@@ -34,6 +34,8 @@ export type RiderRow = {
   name: string;
   rider_type: string;
   is_active: boolean;
+  rest_preference_mode: "random" | "specified" | null;
+  preference_submitted_at: string | null;
 };
 
 export type RestDayLimitRow = {
