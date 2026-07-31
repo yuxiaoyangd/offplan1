@@ -28,6 +28,34 @@ function getDefaultLimit(date: string) {
   return day === 0 || day === 6 ? DEFAULT_WEEKEND_LIMIT : DEFAULT_WEEKDAY_LIMIT;
 }
 
+async function loadTeamRestAvailability(weekId: string, teamId: string) {
+  const [limitsRes, teamRidersRes, teamRes] = await Promise.all([
+    supabase.from("rest_day_limits").select("rest_date,max_slots").eq("week_id", weekId).eq("team_id", teamId),
+    supabase.from("riders").select("rider_id").eq("week_id", weekId).eq("team_id", teamId),
+    supabase.from("schedule_teams").select("name").eq("id", teamId).maybeSingle(),
+  ]);
+  const riderIds = (teamRidersRes.data ?? []).map((row) => row.rider_id);
+  const restCountsRes = riderIds.length > 0
+    ? await supabase
+      .from("rider_schedules")
+      .select("work_date")
+      .eq("week_id", weekId)
+      .in("rider_id", riderIds)
+      .is("slot_id", null)
+    : { data: [] as { work_date: string }[] };
+
+  const limits = (limitsRes.data ?? []).reduce<Record<string, number>>((acc, row) => {
+    acc[row.rest_date] = row.max_slots;
+    return acc;
+  }, {});
+  const counts: Record<string, number> = {};
+  for (const row of restCountsRes.data ?? []) {
+    counts[row.work_date] = (counts[row.work_date] ?? 0) + 1;
+  }
+
+  return { limits, counts, teamName: teamRes.data?.name ?? "" };
+}
+
 export default function WeekSchedulePage() {
   const params = useParams();
   const weekId = params.id as string;
@@ -40,6 +68,7 @@ export default function WeekSchedulePage() {
   const [schedules, setSchedules] = useState<RiderScheduleRow[]>([]);
   const [limits, setLimits] = useState<Record<string, number>>({});
   const [allRestCounts, setAllRestCounts] = useState<Record<string, number>>({});
+  const [teamName, setTeamName] = useState("");
   const [submittingKey, setSubmittingKey] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [showNameGate, setShowNameGate] = useState(false);
@@ -140,40 +169,38 @@ export default function WeekSchedulePage() {
     const curRider = rider;
 
     async function load() {
-      const [limitsRes, schedRes, restCountsRes] = await Promise.all([
-        supabase.from("rest_day_limits").select("rest_date,max_slots").eq("week_start", curWeek.start_date),
+      const [currentRiderRes, schedRes] = await Promise.all([
+        supabase.from("riders").select("*").eq("week_id", curWeek.id).eq("rider_id", curRider.rider_id).maybeSingle(),
         supabase.from("rider_schedules").select("*").eq("week_id", curWeek.id).eq("rider_id", curRider.rider_id),
-        supabase.from("rider_schedules").select("work_date").eq("week_id", curWeek.id).is("slot_id", null),
       ]);
-
-      if (limitsRes.data) {
-        setLimits(limitsRes.data.reduce<Record<string, number>>((acc, r) => { acc[r.rest_date] = r.max_slots; return acc; }, {}));
-      }
+      const currentRider = currentRiderRes.data;
+      if (!currentRider) return;
+      setRider(currentRider);
+      const availability = await loadTeamRestAvailability(curWeek.id, currentRider.team_id);
+      setLimits(availability.limits);
+      setAllRestCounts(availability.counts);
+      setTeamName(availability.teamName);
 
       setSchedules(schedRes.data ?? []);
-
-      const counts: Record<string, number> = {};
-      for (const r of restCountsRes.data ?? []) {
-        counts[r.work_date] = (counts[r.work_date] ?? 0) + 1;
-      }
-      setAllRestCounts(counts);
       setSchedulesLoaded(true);
     }
     void load();
-  }, [week, rider]);
+  }, [week, rider?.rider_id]);
 
   async function refreshRiderSchedules() {
     if (!week || !rider?.rider_id) return;
-    const [schedRes, restCountsRes] = await Promise.all([
+    const [schedRes, currentRiderRes] = await Promise.all([
       supabase.from("rider_schedules").select("*").eq("week_id", week.id).eq("rider_id", rider.rider_id),
-      supabase.from("rider_schedules").select("work_date").eq("week_id", week.id).is("slot_id", null),
+      supabase.from("riders").select("*").eq("week_id", week.id).eq("rider_id", rider.rider_id).maybeSingle(),
     ]);
     setSchedules(schedRes.data ?? []);
-    const counts: Record<string, number> = {};
-    for (const r of restCountsRes.data ?? []) {
-      counts[r.work_date] = (counts[r.work_date] ?? 0) + 1;
+    if (currentRiderRes.data) {
+      setRider(currentRiderRes.data);
+      const availability = await loadTeamRestAvailability(week.id, currentRiderRes.data.team_id);
+      setLimits(availability.limits);
+      setAllRestCounts(availability.counts);
+      setTeamName(availability.teamName);
     }
-    setAllRestCounts(counts);
     setSchedulesLoaded(true);
   }
 
@@ -189,11 +216,12 @@ export default function WeekSchedulePage() {
         const { data } = await supabase.from("time_slots").select("*").eq("week_id", week.id).order("sort_order");
         if (data) setAllSlots(data);
       })
-      .on("postgres_changes", { event: "*", schema: "public", table: "rest_day_limits", filter: week ? `week_start=eq.${week.start_date}` : undefined },
+      .on("postgres_changes", { event: "*", schema: "public", table: "rest_day_limits", filter: week ? `week_id=eq.${week.id}` : undefined },
         async () => {
-          if (!week) return;
-          const { data } = await supabase.from("rest_day_limits").select("rest_date,max_slots").eq("week_start", week.start_date);
-          if (data) setLimits(data.reduce<Record<string, number>>((acc, r) => { acc[r.rest_date] = r.max_slots; return acc; }, {}));
+          if (!week || !rider?.team_id) return;
+          const availability = await loadTeamRestAvailability(week.id, rider.team_id);
+          setLimits(availability.limits);
+          setAllRestCounts(availability.counts);
         })
       .on("postgres_changes", { event: "*", schema: "public", table: "riders", filter: rider ? `rider_id=eq.${rider.rider_id}` : undefined },
         async () => {
@@ -381,7 +409,7 @@ export default function WeekSchedulePage() {
 
       <header className="page-header">
         <h1>{rider ? `Hi, ${rider.name}` : "排班系统"}</h1>
-        <p>{`${formatWeekRange(week.start_date, week.end_date)} · 已选排休 ${currentRestDays.length}/1 天`}</p>
+        <p>{`${formatWeekRange(week.start_date, week.end_date)}${teamName ? ` · ${teamName}` : ""} · 已选排休 ${currentRestDays.length}/1 天`}</p>
       </header>
 
       {message ? <div className="toast-pill">{message}</div> : null}

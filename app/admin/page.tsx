@@ -5,8 +5,15 @@ import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
 import { buildDaysFromRange, formatWeekRange, getWeekStart, formatDateKey } from "@/lib/date";
 import { supabase } from "@/lib/supabase";
-import { parseXlsFile } from "@/lib/xls";
-import type { ScheduleWeekRow, TimeSlotRow, RiderRow, RestDayLimitRow, RiderScheduleRow, ExportXlsData } from "@/lib/types";
+import ImportWeekDialog from "./ImportWeekDialog";
+import type {
+  ExportXlsData,
+  RiderRow,
+  RiderScheduleRow,
+  ScheduleTeamRow,
+  ScheduleWeekRow,
+  TimeSlotRow,
+} from "@/lib/types";
 
 const DEFAULT_WEEKDAY_LIMIT = 5;
 const DEFAULT_WEEKEND_LIMIT = 2;
@@ -59,6 +66,8 @@ export default function AdminPage() {
   const [loadingWeeks, setLoadingWeeks] = useState(true);
   const [activeWeek, setActiveWeek] = useState<ScheduleWeekRow | null>(null);
   const [riderMap, setRiderMap] = useState<Record<string, RiderRow>>({});
+  const [teams, setTeams] = useState<ScheduleTeamRow[]>([]);
+  const [teamCountsByWeek, setTeamCountsByWeek] = useState<Record<string, number>>({});
   const [slots, setSlots] = useState<TimeSlotRow[]>([]);
   const [schedules, setSchedules] = useState<RiderScheduleRow[]>([]);
   const [limits, setLimits] = useState<Record<string, number>>({});
@@ -80,9 +89,8 @@ export default function AdminPage() {
   const [newWeekStart, setNewWeekStart] = useState("");
   const [newWeekEnd, setNewWeekEnd] = useState("");
   const [creating, setCreating] = useState(false);
-  const [importingWeekId, setImportingWeekId] = useState<string | null>(null);
+  const [importWeek, setImportWeek] = useState<ScheduleWeekRow | null>(null);
   const [exportingWeekId, setExportingWeekId] = useState<string | null>(null);
-  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const masterSelectRef = useRef<HTMLInputElement | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
 
@@ -149,24 +157,30 @@ export default function AdminPage() {
   }, [scheduleByRider, weekDays, weekRiders]);
 
   const groups = useMemo(() => {
-    const groupMap = new Map<string, string>();
-    for (const rider of weekRiders) {
-      if (rider.group_id) {
-        groupMap.set(rider.group_id, rider.group_name || rider.group_id);
-      }
-    }
-    return Array.from(groupMap.entries()).map(([id, name]) => ({ id, name }));
-  }, [weekRiders]);
+    return teams.map((team) => ({ id: team.id, name: team.name }));
+  }, [teams]);
 
   const restCounts = useMemo(() => {
     const counts: Record<string, { used: number; limit: number }> = {};
+    const visibleTeams = groupFilter
+      ? teams.filter((team) => team.id === groupFilter)
+      : teams;
     for (const day of weekDays) {
-      const used = schedules.filter((s) => s.work_date === day.key && s.slot_id === null).length;
-      const limit = limits[day.key] ?? getDefaultLimit(day.key);
+      const used = schedules.filter((schedule) => {
+        if (schedule.work_date !== day.key || schedule.slot_id !== null) return false;
+        if (!groupFilter) return true;
+        return riderMap[schedule.rider_id]?.team_id === groupFilter;
+      }).length;
+      const limit = visibleTeams.length > 0
+        ? visibleTeams.reduce(
+          (total, team) => total + (limits[`${team.id}:${day.key}`] ?? getDefaultLimit(day.key)),
+          0,
+        )
+        : getDefaultLimit(day.key);
       counts[day.key] = { used, limit };
     }
     return counts;
-  }, [schedules, weekDays, limits]);
+  }, [groupFilter, limits, riderMap, schedules, teams, weekDays]);
 
   const requestSummaries = useMemo(() => {
     const schedulesByRider = new Map<string, RiderScheduleRow[]>();
@@ -236,7 +250,7 @@ export default function AdminPage() {
       items = items.filter((item) => item.riderName.toLowerCase().includes(lower));
     }
     if (groupFilter) {
-      items = items.filter((item) => riderMap[item.riderId]?.group_id === groupFilter);
+      items = items.filter((item) => riderMap[item.riderId]?.team_id === groupFilter);
     }
     if (showPendingOnly) {
       items = items.filter((item) => (riderStatusMap[item.riderId]?.missingDays ?? 0) > 0);
@@ -342,7 +356,7 @@ export default function AdminPage() {
         if (error) throw error;
         if (data?.failed?.length) {
           const successCount = data.processed ?? (riderIds.length - data.failed.length);
-          responseMessage = `成功 ${successCount} 人，${data.failed.length} 人排休名额不足`;
+          responseMessage = `成功 ${successCount} 人，${data.failed.length} 人未处理（名额不足或已有排休）`;
         } else {
           responseMessage = `已安排排休（${data?.processed ?? riderIds.length}人）`;
         }
@@ -395,16 +409,35 @@ export default function AdminPage() {
       const toArray = (value: unknown): (string | number | null)[] => (Array.isArray(value) ? value : []);
       const header = toArray(payload.header);
       const slotColSet = new Set(payload.slotColumnIndexes.map((index) => Number(index)));
+      const headerDateIndex = header.findIndex((cell) => String(cell ?? "").trim() === "日期");
+      const dateColumnIndex = Number.isInteger(payload.dateColumnIndex)
+        ? Number(payload.dateColumnIndex)
+        : (headerDateIndex >= 0 ? headerDateIndex : 4);
       const rows = (Array.isArray(payload.rows) ? payload.rows : []).map(toArray);
       const aoa = [header, ...rows].map((row) =>
         row.map((cell, ci) => {
           if (cell == null) return "";
           if (slotColSet.has(ci) && typeof cell === "string" && (cell === "0" || cell === "1")) return Number(cell);
+          if (ci === dateColumnIndex) {
+            const digits = String(cell).trim().replace(/\D/g, "");
+            if (digits.length === 8) {
+              const year = Number(digits.slice(0, 4));
+              const month = Number(digits.slice(4, 6));
+              const day = Number(digits.slice(6, 8));
+              return Date.UTC(year, month - 1, day) / 86400000 + 25569;
+            }
+          }
           return cell;
         })
       );
 
       const worksheet = XLSX.utils.aoa_to_sheet(aoa);
+      for (let rowIndex = 1; rowIndex < aoa.length; rowIndex += 1) {
+        const address = XLSX.utils.encode_cell({ r: rowIndex, c: dateColumnIndex });
+        if (worksheet[address]?.t === "n") {
+          worksheet[address].z = "yyyy-mm-dd";
+        }
+      }
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, "排班数据");
 
@@ -421,12 +454,21 @@ export default function AdminPage() {
   useEffect(() => {
     async function load() {
       setLoadingWeeks(true);
-      const weeksRes = await supabase.from("schedule_weeks").select("*").order("start_date", { ascending: false });
+      const [weeksRes, teamsRes] = await Promise.all([
+        supabase.from("schedule_weeks").select("*").order("start_date", { ascending: false }),
+        supabase.from("schedule_teams").select("week_id"),
+      ]);
       if (weeksRes.data) {
         setWeeks(weeksRes.data);
         const savedWeekId = typeof window !== "undefined" ? localStorage.getItem("admin-selected-week-id") : null;
         const savedWeek = savedWeekId ? weeksRes.data.find((w) => w.id === savedWeekId) : null;
         setActiveWeek(savedWeek ?? weeksRes.data.find((w) => w.is_active) ?? weeksRes.data[0] ?? null);
+      }
+      if (teamsRes.data) {
+        setTeamCountsByWeek(teamsRes.data.reduce<Record<string, number>>((counts, team) => {
+          counts[team.week_id] = (counts[team.week_id] ?? 0) + 1;
+          return counts;
+        }, {}));
       }
       setLoadingWeeks(false);
     }
@@ -434,24 +476,28 @@ export default function AdminPage() {
   }, []);
 
   useEffect(() => {
-    if (!activeWeek) { setSlots([]); setSchedules([]); setLimits({}); setRiderMap({}); return; }
+    if (!activeWeek) { setSlots([]); setSchedules([]); setLimits({}); setRiderMap({}); setTeams([]); return; }
     const curWeek = activeWeek;
-    const ws = curWeek.start_date;
     async function loadWeek() {
-      const [slotsRes, schedulesRes, limitsRes, ridersRes] = await Promise.all([
+      const [slotsRes, schedulesRes, limitsRes, ridersRes, teamsRes] = await Promise.all([
         supabase.from("time_slots").select("*").eq("week_id", curWeek.id).order("sort_order"),
         supabase.from("rider_schedules").select("*").eq("week_id", curWeek.id),
-        supabase.from("rest_day_limits").select("rest_date,max_slots").eq("week_start", ws),
+        supabase.from("rest_day_limits").select("team_id,rest_date,max_slots").eq("week_id", curWeek.id),
         supabase.from("riders").select("*").eq("week_id", curWeek.id),
+        supabase.from("schedule_teams").select("*").eq("week_id", curWeek.id).order("name"),
       ]);
       if (slotsRes.data) setSlots(slotsRes.data);
       if (schedulesRes.data) setSchedules(schedulesRes.data);
       if (limitsRes.data) {
-        setLimits(limitsRes.data.reduce<Record<string, number>>((acc, r) => { acc[r.rest_date] = r.max_slots; return acc; }, {}));
+        setLimits(limitsRes.data.reduce<Record<string, number>>((acc, row) => {
+          acc[`${row.team_id}:${row.rest_date}`] = row.max_slots;
+          return acc;
+        }, {}));
       }
       if (ridersRes.data) {
         setRiderMap(ridersRes.data.reduce<Record<string, RiderRow>>((acc, r) => { acc[r.rider_id] = r; return acc; }, {}));
       }
+      if (teamsRes.data) setTeams(teamsRes.data);
     }
     void loadWeek();
   }, [activeWeek]);
@@ -482,15 +528,26 @@ export default function AdminPage() {
         const { data } = await supabase.from("rider_schedules").select("*").eq("week_id", activeWeek.id);
         if (data) setSchedules(data);
       })
-      .on("postgres_changes", { event: "*", schema: "public", table: "rest_day_limits" }, async () => {
+      .on("postgres_changes", { event: "*", schema: "public", table: "rest_day_limits", filter: activeWeek ? `week_id=eq.${activeWeek.id}` : undefined }, async () => {
         if (!activeWeek) return;
-        const { data } = await supabase.from("rest_day_limits").select("rest_date,max_slots").eq("week_start", activeWeek.start_date);
-        if (data) setLimits(data.reduce<Record<string, number>>((acc, r) => { acc[r.rest_date] = r.max_slots; return acc; }, {}));
+        const { data } = await supabase.from("rest_day_limits").select("team_id,rest_date,max_slots").eq("week_id", activeWeek.id);
+        if (data) setLimits(data.reduce<Record<string, number>>((acc, row) => {
+          acc[`${row.team_id}:${row.rest_date}`] = row.max_slots;
+          return acc;
+        }, {}));
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "riders", filter: activeWeek ? `week_id=eq.${activeWeek.id}` : undefined }, async () => {
         if (!activeWeek) return;
         const { data } = await supabase.from("riders").select("*").eq("week_id", activeWeek.id);
         if (data) setRiderMap(data.reduce<Record<string, RiderRow>>((acc, r) => { acc[r.rider_id] = r; return acc; }, {}));
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "schedule_teams", filter: activeWeek ? `week_id=eq.${activeWeek.id}` : undefined }, async () => {
+        if (!activeWeek) return;
+        const { data } = await supabase.from("schedule_teams").select("*").eq("week_id", activeWeek.id).order("name");
+        if (data) {
+          setTeams(data);
+          setTeamCountsByWeek((current) => ({ ...current, [activeWeek.id]: data.length }));
+        }
       })
       .subscribe();
     return () => { void supabase.removeChannel(channel); };
@@ -537,12 +594,7 @@ export default function AdminPage() {
       setShowDeleteConfirm(null);
       return;
     }
-    const week = weeks.find((w) => w.id === weekId);
-    if (week) {
-      await Promise.all([
-        supabase.from("rest_day_limits").delete().eq("week_start", week.start_date),
-      ]);
-    }
+    await supabase.from("rest_day_limits").delete().eq("week_id", weekId);
     const { error } = await supabase.from("schedule_weeks").delete().eq("id", weekId);
     setSavingWeekId(null);
     if (error) { setMessage(error.message); return; }
@@ -580,32 +632,21 @@ export default function AdminPage() {
     }
   }
 
-  async function handleXlsImport(weekId: string, event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    setImportingWeekId(weekId);
-    setMessage(null);
-    try {
-      const buf = await file.arrayBuffer();
-      const data = parseXlsFile(buf);
-      const { error } = await supabase.rpc("import_xls_week", {
-        p_week_id: weekId,
-        p_data: data,
-      });
-      if (error) {
-        setMessage(`导入失败：${error.message}`);
-      } else {
-        setMessage("导入成功");
-      }
-    } catch (e: unknown) {
-      setMessage(`解析失败：${e instanceof Error ? e.message : "未知错误"}`);
-    }
-    setImportingWeekId(null);
-    event.target.value = "";
-  }
-
   return (
     <main className="page-container">
+      {importWeek ? (
+        <ImportWeekDialog
+          week={importWeek}
+          onClose={() => setImportWeek(null)}
+          onImported={(importMessage) => {
+            setMessage(importMessage);
+            setImportWeek(null);
+            if (activeWeek?.id === importWeek.id) {
+              setActiveWeek({ ...activeWeek });
+            }
+          }}
+        />
+      ) : null}
       <header className="page-header">
         <h1>后台管理</h1>
         <p>排班周管理 · 排班总览</p>
@@ -651,6 +692,9 @@ export default function AdminPage() {
                   <span style={{ fontSize: "13px", color: "var(--text-muted)" }}>
                     {week.start_date} ~ {week.end_date}
                   </span>
+                  <span className="week-meta-line">
+                    {teamCountsByWeek[week.id] ?? 1} 个小队
+                  </span>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "8px" }}>
                   <span style={{ fontSize: "12px", color: "var(--text-muted)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -686,20 +730,12 @@ export default function AdminPage() {
                   <button
                     className="btn-ghost btn-sm"
                     type="button"
-                    disabled={importingWeekId === week.id}
-                    onClick={(e) => { e.stopPropagation(); fileInputRefs.current[week.id]?.click(); }}
+                    onClick={(e) => { e.stopPropagation(); setImportWeek(week); }}
                     style={{ color: "var(--text-muted)" }}
                   >
-                    {importingWeekId === week.id ? "导入中..." : "导入XLS"}
+                    导入数据
                   </button>
                 </div>
-                <input
-                  ref={(el) => { fileInputRefs.current[week.id] = el; }}
-                  type="file"
-                  accept=".xls,.xlsx"
-                  style={{ display: "none" }}
-                  onChange={(e) => handleXlsImport(week.id, e)}
-                />
               </div>
             ))}
           </div>
@@ -949,6 +985,9 @@ export default function AdminPage() {
                         <td style={{ textAlign: "left" }}>
                           <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                             <span style={{ fontWeight: 600 }}>{item.riderName}</span>
+                            <span className="rider-team-label">
+                              {teams.find((team) => team.id === riderMap[item.riderId]?.team_id)?.name ?? "默认小队"}
+                            </span>
                             {status ? (
                               <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>
                                 {status.hasRest ? "已有排休" : "缺排休"} · {status.totalSelected}/{status.totalEntries * (activeWeek?.required_slots ?? 0)} 时段

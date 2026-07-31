@@ -19,17 +19,26 @@ export type TimeSlotRow = {
   is_active: boolean;
 };
 
+export type ScheduleTeamRow = {
+  id: string;
+  week_id: string;
+  external_group_id: string | null;
+  name: string;
+  is_default: boolean;
+};
+
 export type RiderRow = {
   rider_id: string;
   week_id: string;
+  team_id: string;
   name: string;
-  group_id: string;
-  group_name: string;
   rider_type: string;
   is_active: boolean;
 };
 
 export type RestDayLimitRow = {
+  week_id: string;
+  team_id: string;
   rest_date: string;
   max_slots: number;
 };
@@ -57,6 +66,11 @@ export type XlsEntry = {
   selections: number[];
 };
 
+export type XlsRider = {
+  riderId: string;
+  riderName: string;
+};
+
 export type XlsSnapshot = {
   header: (string | number | null)[];
   rows: (string | number | null)[][];
@@ -68,10 +82,43 @@ export type XlsData = {
   group: { id: string; name: string };
   slots: XlsSlotDef[];
   entries: XlsEntry[];
+  riders: XlsRider[];
   slotLabels: string[];
   slotColumnIndexes: number[];
   baseColumnCount: number;
   snapshot: XlsSnapshot;
+};
+
+export type RiderTeamAssignment = {
+  riderId: string;
+  riderName: string;
+  externalGroupId: string;
+  groupName: string;
+};
+
+export type RiderTeamFileData = {
+  teams: { externalGroupId: string; name: string }[];
+  assignments: RiderTeamAssignment[];
+  duplicateRiderIds: string[];
+  conflictingRiderIds: string[];
+  conflictingGroups: string[];
+};
+
+export type RiderTeamValidation = {
+  valid: boolean;
+  preferenceRiderCount: number;
+  teamRiderCount: number;
+  matchedCount: number;
+  missingInTeam: XlsRider[];
+  extraInTeam: XlsRider[];
+  nameMismatches: {
+    riderId: string;
+    preferenceName: string;
+    teamName: string;
+  }[];
+  duplicateRiderIds: string[];
+  conflictingRiderIds: string[];
+  conflictingGroups: string[];
 };
 
 export type ExportXlsData = {
@@ -79,6 +126,7 @@ export type ExportXlsData = {
   rows: (string | number | null)[][];
   slotLabels: string[];
   slotColumnIndexes: number[];
+  dateColumnIndex?: number;
   baseColumns: number;
   generated: boolean;
 };

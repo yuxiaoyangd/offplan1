@@ -16,8 +16,14 @@ drop table if exists public.rider_week_rosters cascade;
 drop table if exists public.time_slots cascade;
 drop table if exists public.riders cascade;
 drop table if exists public.rest_day_limits cascade;
+drop table if exists public.schedule_teams cascade;
 drop table if exists public.rest_weeks cascade;
 drop table if exists public.schedule_weeks cascade;
+
+-- 清理历史版本遗留的重载函数，避免授权阶段出现函数名不唯一
+drop function if exists public.ensure_default_day_limit(date, date) cascade;
+drop function if exists public.ensure_default_day_limit(uuid, date) cascade;
+drop function if exists public.ensure_default_day_limit(uuid, uuid, date) cascade;
 
 -- ==================== 3. 建表 ====================
 
@@ -34,6 +40,24 @@ create table public.schedule_weeks (
   updated_at timestamptz not null default now(),
   check (end_date >= start_date)
 );
+
+-- 排班周小队；每个排班周始终至少有一个默认小队
+create table public.schedule_teams (
+  id uuid primary key default gen_random_uuid(),
+  week_id uuid not null references public.schedule_weeks(id) on delete cascade,
+  external_group_id text,
+  name text not null check (char_length(trim(name)) between 1 and 60),
+  is_default boolean not null default false,
+  created_at timestamptz not null default now(),
+  unique (id, week_id)
+);
+
+create unique index idx_schedule_teams_external
+  on public.schedule_teams (week_id, external_group_id)
+  where external_group_id is not null;
+create unique index idx_schedule_teams_default
+  on public.schedule_teams (week_id)
+  where is_default;
 
 -- 时段定义
 create table public.time_slots (
@@ -53,24 +77,26 @@ create table public.time_slots (
 create table public.riders (
   rider_id text not null,
   week_id uuid not null references public.schedule_weeks(id) on delete cascade,
+  team_id uuid not null,
   name text not null check (char_length(trim(name)) between 1 and 20),
-  group_id text not null default '',
-  group_name text not null default '',
   rider_type text not null default '',
   is_active boolean not null default true,
   created_at timestamptz not null default now(),
-  primary key (rider_id, week_id)
+  primary key (rider_id, week_id),
+  foreign key (team_id, week_id) references public.schedule_teams(id, week_id) on delete cascade
 );
 
 -- 每日排休名额
 create table public.rest_day_limits (
   id uuid primary key default gen_random_uuid(),
-  week_start date not null,
+  week_id uuid not null references public.schedule_weeks(id) on delete cascade,
+  team_id uuid not null,
   rest_date date not null,
   max_slots integer not null check (max_slots >= 0 and max_slots <= 50),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  unique (week_start, rest_date)
+  unique (week_id, team_id, rest_date),
+  foreign key (team_id, week_id) references public.schedule_teams(id, week_id) on delete cascade
 );
 
 -- 骑手排班明细
@@ -85,7 +111,7 @@ create table public.rider_schedules (
   is_selected boolean,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  unique (rider_id, work_date, slot_id),
+  unique (rider_id, week_id, work_date, slot_id),
   foreign key (rider_id, week_id) references public.riders(rider_id, week_id) on delete cascade
 );
 
@@ -102,18 +128,18 @@ create table public.week_import_snapshots (
 
 -- ==================== 4. 索引 ====================
 
--- 每个骑手每天最多一条排休记录
-create unique index idx_rs_rest on public.rider_schedules (rider_id, work_date) where slot_id is null;
+-- 每个骑手每周最多一条排休记录
+create unique index idx_rs_rest on public.rider_schedules (rider_id, week_id) where slot_id is null;
 
 -- 每个骑手每天每时段最多一条记录
-create unique index idx_rs_slot on public.rider_schedules (rider_id, work_date, slot_id) where slot_id is not null;
+create unique index idx_rs_slot on public.rider_schedules (rider_id, week_id, work_date, slot_id) where slot_id is not null;
 
 create index idx_rs_week on public.rider_schedules (week_id);
 create index idx_rs_rider_week on public.rider_schedules (rider_id, week_id);
 create index idx_rs_work_date on public.rider_schedules (work_date);
 create index idx_ts_week on public.time_slots (week_id, sort_order);
-create index idx_riders_week on public.riders (week_id);
-create index idx_rdl_week on public.rest_day_limits (week_start);
+create index idx_riders_week on public.riders (week_id, team_id);
+create index idx_rdl_week on public.rest_day_limits (week_id, team_id);
 create index idx_sw_active on public.schedule_weeks (is_active, start_date desc);
 
 -- ==================== 5. 函数 ====================
@@ -126,40 +152,190 @@ begin
 end;
 $$;
 
+create or replace function public.ensure_default_team(p_week_id uuid)
+returns uuid language plpgsql
+as $$
+declare
+  v_team_id uuid;
+begin
+  select id into v_team_id
+  from public.schedule_teams
+  where week_id = p_week_id and is_default
+  limit 1;
+
+  if v_team_id is null then
+    insert into public.schedule_teams (week_id, name, is_default)
+    values (p_week_id, '默认小队', true)
+    on conflict (week_id) where is_default do update set name = excluded.name
+    returning id into v_team_id;
+  end if;
+
+  return v_team_id;
+end;
+$$;
+
+create or replace function public.create_default_team_for_week()
+returns trigger language plpgsql
+as $$
+begin
+  perform public.ensure_default_team(new.id);
+  return new;
+end;
+$$;
+
 -- 批量导入 XLS 数据（事务内完成）
 -- 会重置该周的时段、排班记录，并保存原始导入快照
 -- p_data jsonb 格式：
 -- {
 --   "weekStart": "2026-06-01",
 --   "weekEnd": "2026-06-07",
---   "group": {"id":"...","name":"..."},
 --   "slots": [{"name":"午高峰","startTime":"10:30","endTime":"13:30","sortOrder":1}, ...],
 --   "entries": [
 --     {"riderId":"4598058","riderName":"龚传仓","date":"20260601","selections":[1,0,0,0,0,0]},
 --     ...
---   ]
+--   ],
+--   "teams": [{"externalGroupId":"320965","name":"核心1队"}],
+--   "riderTeams": [{"riderId":"4598058","riderName":"龚传仓","externalGroupId":"320965","groupName":"核心1队"}]
 -- }
 create or replace function public.import_xls_week(p_week_id uuid, p_data jsonb)
 returns jsonb language plpgsql
 as $$
 declare
-  v_group_id text;
-  v_group_name text;
   v_slot jsonb;
   v_entry jsonb;
+  v_team jsonb;
   v_rider_id text;
   v_rider_name text;
+  v_team_id uuid;
+  v_has_team_data boolean;
   v_slot_ids uuid[];
   v_slot_idx integer;
   v_selection integer;
   v_work_date date;
+  v_limit_template jsonb := '{}'::jsonb;
+  v_team_limit_templates jsonb := '{}'::jsonb;
+  v_day date;
+  v_week_start date;
+  v_week_end date;
+  v_team_rec record;
+  v_limit integer;
 begin
-  v_group_id := p_data->'group'->>'id';
-  v_group_name := p_data->'group'->>'name';
+  if not exists (select 1 from public.schedule_weeks where id = p_week_id) then
+    raise exception '排班周不存在';
+  end if;
+
+  if not exists (
+    select 1
+    from public.schedule_weeks
+    where id = p_week_id
+      and start_date = (p_data->>'weekStart')::date
+      and end_date = (p_data->>'weekEnd')::date
+  ) then
+    raise exception '文件日期范围与当前排班周不一致';
+  end if;
+
+  v_has_team_data := coalesce(jsonb_array_length(p_data->'riderTeams'), 0) > 0;
+
+  if v_has_team_data then
+    if (
+      select count(*) <> count(distinct item->>'riderId')
+      from jsonb_array_elements(p_data->'riderTeams') item
+    ) then
+      raise exception '小队数据存在重复骑手ID';
+    end if;
+
+    if exists (
+      select 1
+      from (
+        select distinct item->>'riderId' as rider_id
+        from jsonb_array_elements(p_data->'entries') item
+      ) preference
+      full join (
+        select item->>'riderId' as rider_id
+        from jsonb_array_elements(p_data->'riderTeams') item
+      ) team using (rider_id)
+      where preference.rider_id is null or team.rider_id is null
+    ) then
+      raise exception '两份文档的骑手名单不一致';
+    end if;
+
+    if exists (
+      select 1
+      from jsonb_array_elements(p_data->'riderTeams') team
+      join (
+        select distinct on (item->>'riderId')
+          item->>'riderId' as rider_id,
+          item->>'riderName' as rider_name
+        from jsonb_array_elements(p_data->'entries') item
+      ) preference on preference.rider_id = team->>'riderId'
+      where regexp_replace(preference.rider_name, '\s+', '', 'g')
+        <> regexp_replace(team->>'riderName', '\s+', '', 'g')
+    ) then
+      raise exception '两份文档存在骑手姓名不一致';
+    end if;
+  end if;
+
+  select coalesce(jsonb_object_agg(to_char(rdl.rest_date, 'YYYY-MM-DD'), rdl.max_slots), '{}'::jsonb)
+  into v_limit_template
+  from public.rest_day_limits rdl
+  join public.schedule_teams st on st.id = rdl.team_id
+  where rdl.week_id = p_week_id and st.is_default;
+
+  select coalesce(
+    jsonb_object_agg(
+      coalesce(st.external_group_id, '__default__') || '|' || to_char(rdl.rest_date, 'YYYY-MM-DD'),
+      rdl.max_slots
+    ),
+    '{}'::jsonb
+  )
+  into v_team_limit_templates
+  from public.rest_day_limits rdl
+  join public.schedule_teams st on st.id = rdl.team_id
+  where rdl.week_id = p_week_id;
+
+  select start_date, end_date into v_week_start, v_week_end
+  from public.schedule_weeks where id = p_week_id;
 
   delete from public.week_import_snapshots where week_id = p_week_id;
   delete from public.rider_schedules where week_id = p_week_id;
   delete from public.time_slots where week_id = p_week_id;
+  delete from public.rest_day_limits where week_id = p_week_id;
+  delete from public.riders where week_id = p_week_id;
+  delete from public.schedule_teams where week_id = p_week_id;
+
+  if v_has_team_data then
+    for v_team in select * from jsonb_array_elements(p_data->'teams')
+    loop
+      insert into public.schedule_teams (week_id, external_group_id, name, is_default)
+      values (
+        p_week_id,
+        nullif(btrim(v_team->>'externalGroupId'), ''),
+        btrim(v_team->>'name'),
+        false
+      );
+    end loop;
+  else
+    v_team_id := public.ensure_default_team(p_week_id);
+  end if;
+
+  for v_team_rec in
+    select id, external_group_id from public.schedule_teams where week_id = p_week_id
+  loop
+    v_day := v_week_start;
+    while v_day <= v_week_end loop
+      v_limit := coalesce(
+        (
+          v_team_limit_templates
+          ->>(coalesce(v_team_rec.external_group_id, '__default__') || '|' || to_char(v_day, 'YYYY-MM-DD'))
+        )::integer,
+        (v_limit_template->>to_char(v_day, 'YYYY-MM-DD'))::integer,
+        case when extract(dow from v_day) in (0, 6) then 2 else 5 end
+      );
+      insert into public.rest_day_limits (week_id, team_id, rest_date, max_slots)
+      values (p_week_id, v_team_rec.id, v_day, v_limit);
+      v_day := v_day + 1;
+    end loop;
+  end loop;
 
   for v_slot in select * from jsonb_array_elements(p_data->'slots')
   loop
@@ -184,12 +360,25 @@ begin
     v_rider_name := v_entry->>'riderName';
 
     if v_rider_id is not null and v_rider_name is not null then
-      insert into public.riders (rider_id, week_id, name, group_id, group_name)
-      values (v_rider_id, p_week_id, v_rider_name, v_group_id, v_group_name)
+      if v_has_team_data then
+        select st.id into v_team_id
+        from jsonb_array_elements(p_data->'riderTeams') assignment
+        join public.schedule_teams st
+          on st.week_id = p_week_id
+         and st.external_group_id = assignment->>'externalGroupId'
+        where assignment->>'riderId' = v_rider_id
+        limit 1;
+      end if;
+
+      if v_team_id is null then
+        raise exception '骑手 % 未找到所属小队', v_rider_id;
+      end if;
+
+      insert into public.riders (rider_id, week_id, team_id, name)
+      values (v_rider_id, p_week_id, v_team_id, v_rider_name)
       on conflict (rider_id, week_id) do update set
         name = v_rider_name,
-        group_id = v_group_id,
-        group_name = v_group_name;
+        team_id = v_team_id;
 
       if v_slot_ids is not null and coalesce(v_entry->>'date', '') ~ '^\d{8}$' then
         v_work_date := to_date(v_entry->>'date', 'YYYYMMDD');
@@ -200,7 +389,7 @@ begin
             if v_selection = 1 then
               insert into public.rider_schedules (rider_id, week_id, work_date, slot_id, is_selected)
               values (v_rider_id, p_week_id, v_work_date, v_slot_ids[v_slot_idx], true)
-              on conflict (rider_id, work_date, slot_id) where slot_id is not null
+              on conflict (rider_id, week_id, work_date, slot_id) where slot_id is not null
               do update set is_selected = true;
             end if;
           end loop;
@@ -228,7 +417,12 @@ begin
       created_at = now();
   end if;
 
-  return jsonb_build_object('success', true, 'message', '导入完成（已更新骑手名单、时段与初始选择）');
+  return jsonb_build_object(
+    'success', true,
+    'message', '导入完成（已更新骑手名单、小队、时段与初始选择）',
+    'teamCount', (select count(*) from public.schedule_teams where week_id = p_week_id),
+    'riderCount', (select count(*) from public.riders where week_id = p_week_id)
+  );
 end;
 $$;
 
@@ -360,15 +554,21 @@ begin
         'rows', '[]'::jsonb,
         'slotLabels', to_jsonb(slot_labels),
         'slotColumnIndexes', to_jsonb(slot_col_positions),
+        'dateColumnIndex', date_col - 1,
         'baseColumns', base_columns,
         'generated', true
       );
     end if;
 
     for rider_rec in
-      select rider_id, name, group_id, group_name, rider_type
-      from public.riders where week_id = p_week_id
-      order by name
+      select r.rider_id, r.name,
+             coalesce(st.external_group_id, '') as group_id,
+             st.name as group_name,
+             r.rider_type
+      from public.riders r
+      join public.schedule_teams st on st.id = r.team_id
+      where r.week_id = p_week_id
+      order by st.name, r.name
     loop
       cur_date := start_date;
 
@@ -395,6 +595,7 @@ begin
       'rows', result_rows,
       'slotLabels', to_jsonb(slot_labels),
       'slotColumnIndexes', to_jsonb(slot_col_positions),
+      'dateColumnIndex', date_col - 1,
       'baseColumns', base_columns,
       'generated', true
     );
@@ -451,6 +652,7 @@ begin
     'rows', result_rows,
     'slotLabels', to_jsonb(slot_labels),
     'slotColumnIndexes', to_jsonb(slot_col_positions),
+    'dateColumnIndex', date_col - 1,
     'baseColumns', base_columns,
     'generated', false
   );
@@ -480,12 +682,14 @@ begin
   select jsonb_agg(jsonb_build_object(
     'riderId', r.rider_id,
     'name', r.name,
-    'groupId', r.group_id,
-    'groupName', r.group_name,
+    'teamId', r.team_id,
+    'groupId', coalesce(st.external_group_id, ''),
+    'groupName', st.name,
     'requiredSlots', v_required_slots
-  ) order by r.name)
+  ) order by st.name, r.name)
   into v_result
   from public.riders r
+  join public.schedule_teams st on st.id = r.team_id
   where r.week_id = p_week_id;
   return coalesce(v_result, '[]'::jsonb);
 end;
@@ -571,16 +775,16 @@ begin
 
   -- 如果当天有排休记录，先删除
   delete from public.rider_schedules
-  where rider_id = p_rider_id and work_date = p_work_date and slot_id is null;
+  where week_id = p_week_id and rider_id = p_rider_id and work_date = p_work_date and slot_id is null;
 
   -- 删除旧时段
   delete from public.rider_schedules
-  where rider_id = p_rider_id and work_date = p_work_date and slot_id = p_old_slot_id;
+  where week_id = p_week_id and rider_id = p_rider_id and work_date = p_work_date and slot_id = p_old_slot_id;
 
   -- 选择新时段
   insert into public.rider_schedules (rider_id, week_id, work_date, slot_id, is_selected)
   values (p_rider_id, p_week_id, p_work_date, p_new_slot_id, true)
-  on conflict (rider_id, work_date, slot_id) where slot_id is not null
+  on conflict (rider_id, week_id, work_date, slot_id) where slot_id is not null
   do update set is_selected = true;
 
   return jsonb_build_object('success', true, 'selected', true);
@@ -596,46 +800,66 @@ create or replace function public.bulk_set_rider_rest(
 returns jsonb language plpgsql
 as $$
 declare
-  v_week_start date;
+  v_team_id uuid;
   v_limit integer;
   v_used integer;
   v_applied integer := 0;
   v_failed text[] := array[]::text[];
   v_rider text;
-  v_has_rest boolean;
+  v_existing_rest_date date;
 begin
   if p_rider_ids is null or array_length(p_rider_ids, 1) is null then
     return jsonb_build_object('success', false, 'message', '未提供骑手名单');
   end if;
 
-  select start_date into v_week_start from public.schedule_weeks where id = p_week_id;
-  if v_week_start is null then
+  if not exists(select 1 from public.schedule_weeks where id = p_week_id) then
     return jsonb_build_object('success', false, 'message', '排班周不存在');
   end if;
 
-  -- 确保排休名额存在
-  select max_slots into v_limit
-  from public.rest_day_limits
-  where week_start = v_week_start and rest_date = p_work_date;
-
-  if v_limit is null then
-    v_limit := public.ensure_default_day_limit(v_week_start, p_work_date);
-  end if;
-
-  select count(*) into v_used
-  from public.rider_schedules
-  where week_id = p_week_id and work_date = p_work_date and slot_id is null;
-
   for v_rider in select unnest(p_rider_ids)
   loop
-    select exists(
-      select 1 from public.rider_schedules
-      where rider_id = v_rider and work_date = p_work_date and slot_id is null
-    ) into v_has_rest;
+    select team_id into v_team_id
+    from public.riders
+    where week_id = p_week_id and rider_id = v_rider;
 
-    if v_has_rest then
+    if v_team_id is null then
+      v_failed := array_append(v_failed, v_rider);
       continue;
     end if;
+
+    select work_date into v_existing_rest_date
+    from public.rider_schedules
+    where week_id = p_week_id and rider_id = v_rider and slot_id is null
+    limit 1;
+
+    if v_existing_rest_date = p_work_date then
+      continue;
+    end if;
+    if v_existing_rest_date is not null then
+      v_failed := array_append(v_failed, v_rider);
+      continue;
+    end if;
+
+    select max_slots into v_limit
+    from public.rest_day_limits
+    where week_id = p_week_id and team_id = v_team_id and rest_date = p_work_date;
+
+    if v_limit is null then
+      v_limit := public.ensure_default_day_limit(p_week_id, v_team_id, p_work_date);
+    end if;
+    select max_slots into v_limit
+    from public.rest_day_limits
+    where week_id = p_week_id and team_id = v_team_id and rest_date = p_work_date
+    for update;
+
+    select count(*) into v_used
+    from public.rider_schedules rs
+    join public.riders r
+      on r.week_id = rs.week_id and r.rider_id = rs.rider_id
+    where rs.week_id = p_week_id
+      and r.team_id = v_team_id
+      and rs.work_date = p_work_date
+      and rs.slot_id is null;
 
     if v_used >= v_limit then
       v_failed := array_append(v_failed, v_rider);
@@ -644,11 +868,11 @@ begin
 
     -- 删除当日所有出勤
     delete from public.rider_schedules
-    where rider_id = v_rider and work_date = p_work_date and slot_id is not null;
+    where week_id = p_week_id and rider_id = v_rider and work_date = p_work_date and slot_id is not null;
 
     insert into public.rider_schedules (rider_id, week_id, work_date, slot_id, is_selected)
     values (v_rider, p_week_id, p_work_date, null, null)
-    on conflict (rider_id, work_date) where slot_id is null do nothing;
+    on conflict (rider_id, week_id) where slot_id is null do nothing;
 
     v_used := v_used + 1;
     v_applied := v_applied + 1;
@@ -731,14 +955,14 @@ begin
     while v_day <= v_end loop
       -- 清除当天所有记录（排休+出勤）
       delete from public.rider_schedules
-      where rider_id = v_rider and work_date = v_day;
+      where week_id = p_week_id and rider_id = v_rider and work_date = v_day;
 
       -- 插入默认时段
       foreach v_slot in array v_defaults
       loop
         insert into public.rider_schedules (rider_id, week_id, work_date, slot_id, is_selected)
         values (v_rider, p_week_id, v_day, v_slot, true)
-        on conflict (rider_id, work_date, slot_id) where slot_id is not null
+        on conflict (rider_id, week_id, work_date, slot_id) where slot_id is not null
         do update set is_selected = true;
       end loop;
 
@@ -781,7 +1005,7 @@ begin
     while v_day <= v_end loop
       select exists(
         select 1 from public.rider_schedules
-        where rider_id = v_rider and work_date = v_day and slot_id is null
+        where week_id = p_week_id and rider_id = v_rider and work_date = v_day and slot_id is null
       ) into v_has_rest;
 
       if v_has_rest then
@@ -789,7 +1013,7 @@ begin
       else
         insert into public.rider_schedules (rider_id, week_id, work_date, slot_id, is_selected)
         values (v_rider, p_week_id, v_day, p_slot_id, true)
-        on conflict (rider_id, work_date, slot_id) where slot_id is not null
+        on conflict (rider_id, week_id, work_date, slot_id) where slot_id is not null
         do update set is_selected = true;
         v_processed := v_processed + 1;
       end if;
@@ -854,24 +1078,24 @@ begin
 
   -- 如果当天有排休记录，先删除
   delete from public.rider_schedules
-  where rider_id = p_rider_id and work_date = p_work_date and slot_id is null;
+  where week_id = p_week_id and rider_id = p_rider_id and work_date = p_work_date and slot_id is null;
 
   -- 获取当前状态
   select is_selected into v_current
   from public.rider_schedules
-  where rider_id = p_rider_id and work_date = p_work_date and slot_id = p_slot_id;
+  where week_id = p_week_id and rider_id = p_rider_id and work_date = p_work_date and slot_id = p_slot_id;
 
   if v_current is true then
     -- 取消选择
     delete from public.rider_schedules
-    where rider_id = p_rider_id and work_date = p_work_date and slot_id = p_slot_id;
+    where week_id = p_week_id and rider_id = p_rider_id and work_date = p_work_date and slot_id = p_slot_id;
     return jsonb_build_object('success', true, 'selected', false);
   else
     -- 选择前检查是否已达到上限
     if v_required_slots > 0 then
       select count(*) into v_current_selected_count
       from public.rider_schedules
-      where rider_id = p_rider_id and work_date = p_work_date and slot_id is not null and is_selected = true;
+      where week_id = p_week_id and rider_id = p_rider_id and work_date = p_work_date and slot_id is not null and is_selected = true;
 
       if v_current_selected_count >= v_required_slots then
         return jsonb_build_object('success', false, 'message', '每天只能选择 ' || v_required_slots || ' 个时段');
@@ -881,7 +1105,7 @@ begin
     -- 选择
     insert into public.rider_schedules (rider_id, week_id, work_date, slot_id, is_selected)
     values (p_rider_id, p_week_id, p_work_date, p_slot_id, true)
-    on conflict (rider_id, work_date, slot_id) where slot_id is not null
+    on conflict (rider_id, week_id, work_date, slot_id) where slot_id is not null
     do update set is_selected = true;
     return jsonb_build_object('success', true, 'selected', true);
   end if;
@@ -897,22 +1121,52 @@ create or replace function public.set_rider_rest(
 returns jsonb language plpgsql
 as $$
 declare
+  v_team_id uuid;
   v_limit integer;
   v_used integer;
+  v_existing_rest_date date;
 begin
+  select team_id into v_team_id
+  from public.riders
+  where week_id = p_week_id and rider_id = p_rider_id;
+
+  if v_team_id is null then
+    return jsonb_build_object('success', false, 'message', '骑手不在当前排班周');
+  end if;
+
+  select work_date into v_existing_rest_date
+  from public.rider_schedules
+  where week_id = p_week_id and rider_id = p_rider_id and slot_id is null
+  limit 1;
+
+  if v_existing_rest_date = p_work_date then
+    return jsonb_build_object('success', true, 'message', '已设为排休');
+  end if;
+  if v_existing_rest_date is not null then
+    return jsonb_build_object('success', false, 'message', '每周只能选择一天排休，请先取消原排休');
+  end if;
+
   -- 检查排休名额
   select max_slots into v_limit
   from public.rest_day_limits
-  where week_start = (select start_date from public.schedule_weeks where id = p_week_id)
-    and rest_date = p_work_date;
+  where week_id = p_week_id and team_id = v_team_id and rest_date = p_work_date;
 
   if v_limit is null then
-    v_limit := 5;
+    v_limit := public.ensure_default_day_limit(p_week_id, v_team_id, p_work_date);
   end if;
+  select max_slots into v_limit
+  from public.rest_day_limits
+  where week_id = p_week_id and team_id = v_team_id and rest_date = p_work_date
+  for update;
 
   select count(*) into v_used
-  from public.rider_schedules
-  where week_id = p_week_id and work_date = p_work_date and slot_id is null;
+  from public.rider_schedules rs
+  join public.riders r
+    on r.week_id = rs.week_id and r.rider_id = rs.rider_id
+  where rs.week_id = p_week_id
+    and r.team_id = v_team_id
+    and rs.work_date = p_work_date
+    and rs.slot_id is null;
 
   if v_used >= v_limit then
     return jsonb_build_object('success', false, 'message', '该日期排休名额已满');
@@ -920,12 +1174,12 @@ begin
 
   -- 删除该骑手当天的所有时段选择
   delete from public.rider_schedules
-  where rider_id = p_rider_id and work_date = p_work_date and slot_id is not null;
+  where week_id = p_week_id and rider_id = p_rider_id and work_date = p_work_date and slot_id is not null;
 
   -- 插入排休记录
   insert into public.rider_schedules (rider_id, week_id, work_date, slot_id, is_selected)
   values (p_rider_id, p_week_id, p_work_date, null, null)
-  on conflict (rider_id, work_date) where slot_id is null do nothing;
+  on conflict (rider_id, week_id) where slot_id is null do nothing;
 
   return jsonb_build_object('success', true, 'message', '已设为排休');
 end;
@@ -941,7 +1195,7 @@ returns jsonb language plpgsql
 as $$
 begin
   delete from public.rider_schedules
-  where rider_id = p_rider_id and work_date = p_work_date and slot_id is null;
+  where week_id = p_week_id and rider_id = p_rider_id and work_date = p_work_date and slot_id is null;
   return jsonb_build_object('success', true);
 end;
 $$;
@@ -1007,7 +1261,11 @@ end;
 $$;
 
 -- 确保每日排休名额存在（返回上限）
-create or replace function public.ensure_default_day_limit(p_week_start date, p_rest_date date)
+create or replace function public.ensure_default_day_limit(
+  p_week_id uuid,
+  p_team_id uuid,
+  p_rest_date date
+)
 returns integer language plpgsql
 as $$
 declare
@@ -1016,16 +1274,16 @@ declare
 begin
   select max_slots into v_max_slots
   from public.rest_day_limits
-  where week_start = p_week_start and rest_date = p_rest_date;
+  where week_id = p_week_id and team_id = p_team_id and rest_date = p_rest_date;
 
   if found then return v_max_slots; end if;
 
   v_day := extract(dow from p_rest_date);
   v_max_slots := case when v_day in (0, 6) then 2 else 5 end;
 
-  insert into public.rest_day_limits (week_start, rest_date, max_slots)
-  values (p_week_start, p_rest_date, v_max_slots)
-  on conflict (week_start, rest_date) do nothing;
+  insert into public.rest_day_limits (week_id, team_id, rest_date, max_slots)
+  values (p_week_id, p_team_id, p_rest_date, v_max_slots)
+  on conflict (week_id, team_id, rest_date) do nothing;
 
   return v_max_slots;
 end;
@@ -1050,6 +1308,8 @@ $$;
 
 create trigger trg_sw_updated_at before update on public.schedule_weeks
   for each row execute function public.set_updated_at();
+create trigger trg_sw_default_team after insert on public.schedule_weeks
+  for each row execute function public.create_default_team_for_week();
 create trigger trg_ts_updated_at before update on public.time_slots
   for each row execute function public.set_updated_at();
 create trigger trg_rdl_updated_at before update on public.rest_day_limits
@@ -1060,6 +1320,7 @@ create trigger trg_rs_updated_at before update on public.rider_schedules
 -- ==================== 7. RLS ====================
 
 alter table public.schedule_weeks enable row level security;
+alter table public.schedule_teams enable row level security;
 alter table public.time_slots enable row level security;
 alter table public.riders enable row level security;
 alter table public.rest_day_limits enable row level security;
@@ -1068,6 +1329,8 @@ alter table public.week_import_snapshots enable row level security;
 
 create policy "public read" on public.schedule_weeks for select to anon, authenticated using (true);
 create policy "public write" on public.schedule_weeks for all to anon, authenticated using (true) with check (true);
+create policy "public read" on public.schedule_teams for select to anon, authenticated using (true);
+create policy "public write" on public.schedule_teams for all to anon, authenticated using (true) with check (true);
 create policy "public read" on public.time_slots for select to anon, authenticated using (true);
 create policy "public write" on public.time_slots for all to anon, authenticated using (true) with check (true);
 create policy "public read" on public.riders for select to anon, authenticated using (true);
@@ -1083,6 +1346,7 @@ create policy "public write" on public.week_import_snapshots for all to anon, au
 
 grant usage on schema public to anon, authenticated;
 grant all on public.schedule_weeks to anon, authenticated;
+grant all on public.schedule_teams to anon, authenticated;
 grant all on public.time_slots to anon, authenticated;
 grant all on public.riders to anon, authenticated;
 grant all on public.rest_day_limits to anon, authenticated;
@@ -1090,6 +1354,7 @@ grant all on public.rider_schedules to anon, authenticated;
 grant all on public.week_import_snapshots to anon, authenticated;
 
 grant execute on function public.import_xls_week to anon, authenticated;
+grant execute on function public.ensure_default_team to anon, authenticated;
 grant execute on function public.export_xls_week to anon, authenticated;
 grant execute on function public.clear_week_schedules to anon, authenticated;
 grant execute on function public.get_week_riders to anon, authenticated;
@@ -1108,12 +1373,13 @@ grant execute on function public.cancel_rider_rest to anon, authenticated;
 grant execute on function public.get_rider_week to anon, authenticated;
 grant execute on function public.get_week_rest_counts to anon, authenticated;
 grant execute on function public.get_week_slot_counts to anon, authenticated;
-grant execute on function public.ensure_default_day_limit to anon, authenticated;
+grant execute on function public.ensure_default_day_limit(uuid, uuid, date) to anon, authenticated;
 grant execute on function public.clone_week_slots to anon, authenticated;
 
 -- ==================== 9. Realtime ====================
 
 alter publication supabase_realtime add table public.schedule_weeks;
+alter publication supabase_realtime add table public.schedule_teams;
 alter publication supabase_realtime add table public.time_slots;
 alter publication supabase_realtime add table public.riders;
 alter publication supabase_realtime add table public.rest_day_limits;

@@ -4,7 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { buildDaysFromRange, formatWeekRange, getWeekStart, formatDateKey } from "@/lib/date";
 import { supabase } from "@/lib/supabase";
-import type { ScheduleWeekRow, TimeSlotRow, RestDayLimitRow, RiderScheduleRow } from "@/lib/types";
+import type {
+  RiderRow,
+  RiderScheduleRow,
+  ScheduleTeamRow,
+  ScheduleWeekRow,
+  TimeSlotRow,
+} from "@/lib/types";
 
 const DEFAULT_WEEKDAY_LIMIT = 5;
 const DEFAULT_WEEKEND_LIMIT = 2;
@@ -22,8 +28,10 @@ export default function WeekEditPage() {
   const [week, setWeek] = useState<ScheduleWeekRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [slots, setSlots] = useState<TimeSlotRow[]>([]);
+  const [teams, setTeams] = useState<ScheduleTeamRow[]>([]);
+  const [riders, setRiders] = useState<RiderRow[]>([]);
+  const [schedules, setSchedules] = useState<RiderScheduleRow[]>([]);
   const [limits, setLimits] = useState<Record<string, number>>({});
-  const [stableStartDate, setStableStartDate] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   const weekDays = useMemo(() => {
@@ -31,21 +39,46 @@ export default function WeekEditPage() {
     return buildDaysFromRange(week.start_date, week.end_date);
   }, [week]);
 
+  const riderTeamMap = useMemo(
+    () => new Map(riders.map((rider) => [rider.rider_id, rider.team_id])),
+    [riders],
+  );
+
+  const usedLimits = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const schedule of schedules) {
+      if (schedule.slot_id !== null) continue;
+      const teamId = riderTeamMap.get(schedule.rider_id);
+      if (!teamId) continue;
+      const key = `${teamId}:${schedule.work_date}`;
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+    return counts;
+  }, [riderTeamMap, schedules]);
+
   useEffect(() => {
     async function load() {
       setLoading(true);
       const { data: weekData } = await supabase.from("schedule_weeks").select("*").eq("id", weekId).maybeSingle();
-      const [slotsRes, limitsRes] = await Promise.all([
+      const [slotsRes, teamsRes, limitsRes, ridersRes, schedulesRes] = await Promise.all([
         supabase.from("time_slots").select("*").eq("week_id", weekId).order("sort_order"),
+        supabase.from("schedule_teams").select("*").eq("week_id", weekId).order("name"),
         weekData
-          ? supabase.from("rest_day_limits").select("rest_date,max_slots").eq("week_start", weekData.start_date)
+          ? supabase.from("rest_day_limits").select("team_id,rest_date,max_slots").eq("week_id", weekData.id)
           : Promise.resolve({ data: [], error: null }),
+        supabase.from("riders").select("*").eq("week_id", weekId),
+        supabase.from("rider_schedules").select("*").eq("week_id", weekId).is("slot_id", null),
       ]);
       setWeek(weekData ?? null);
-      if (weekData) setStableStartDate(weekData.start_date);
       setSlots(slotsRes.data ?? []);
+      setTeams(teamsRes.data ?? []);
+      setRiders(ridersRes.data ?? []);
+      setSchedules(schedulesRes.data ?? []);
       if (limitsRes.data) {
-        setLimits(limitsRes.data.reduce<Record<string, number>>((acc, r) => { acc[r.rest_date] = r.max_slots; return acc; }, {}));
+        setLimits(limitsRes.data.reduce<Record<string, number>>((acc, row) => {
+          acc[`${row.team_id}:${row.rest_date}`] = row.max_slots;
+          return acc;
+        }, {}));
       }
       setLoading(false);
     }
@@ -63,20 +96,30 @@ export default function WeekEditPage() {
       .channel(`week-edit-${weekId}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "schedule_weeks", filter: `id=eq.${weekId}` }, async () => {
         const { data } = await supabase.from("schedule_weeks").select("*").eq("id", weekId).maybeSingle();
-        if (data) { setWeek(data); setStableStartDate(data.start_date); }
+        if (data) setWeek(data);
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "time_slots", filter: `week_id=eq.${weekId}` }, async () => {
         const { data } = await supabase.from("time_slots").select("*").eq("week_id", weekId).order("sort_order");
         if (data) setSlots(data);
       })
-      .on("postgres_changes", { event: "*", schema: "public", table: "rest_day_limits", filter: stableStartDate ? `week_start=eq.${stableStartDate}` : undefined }, async () => {
-        if (!stableStartDate) return;
-        const { data } = await supabase.from("rest_day_limits").select("rest_date,max_slots").eq("week_start", stableStartDate);
-        if (data) setLimits(data.reduce<Record<string, number>>((acc, r) => { acc[r.rest_date] = r.max_slots; return acc; }, {}));
+      .on("postgres_changes", { event: "*", schema: "public", table: "rest_day_limits", filter: `week_id=eq.${weekId}` }, async () => {
+        const { data } = await supabase.from("rest_day_limits").select("team_id,rest_date,max_slots").eq("week_id", weekId);
+        if (data) setLimits(data.reduce<Record<string, number>>((acc, row) => {
+          acc[`${row.team_id}:${row.rest_date}`] = row.max_slots;
+          return acc;
+        }, {}));
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "schedule_teams", filter: `week_id=eq.${weekId}` }, async () => {
+        const { data } = await supabase.from("schedule_teams").select("*").eq("week_id", weekId).order("name");
+        if (data) setTeams(data);
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "rider_schedules", filter: `week_id=eq.${weekId}` }, async () => {
+        const { data } = await supabase.from("rider_schedules").select("*").eq("week_id", weekId).is("slot_id", null);
+        if (data) setSchedules(data);
       })
       .subscribe();
     return () => { void supabase.removeChannel(channel); };
-  }, [weekId, stableStartDate]);
+  }, [weekId]);
 
   async function saveWeek() {
     if (!week?.start_date || !week?.end_date) { setMessage("请完整填写起止日期。"); return; }
@@ -115,12 +158,22 @@ export default function WeekEditPage() {
   async function saveAllLimits() {
     if (!week) return;
     setMessage(null);
-    const rows = weekDays.map((day) => ({
-      week_start: week.start_date,
-      rest_date: day.key,
-      max_slots: limits[day.key] ?? getDefaultLimit(day.key),
+    const rows = teams.flatMap((team) => weekDays.map((day) => {
+      const key = `${team.id}:${day.key}`;
+      return {
+        week_id: week.id,
+        team_id: team.id,
+        rest_date: day.key,
+        max_slots: limits[key] ?? getDefaultLimit(day.key),
+      };
     }));
-    const { error } = await supabase.from("rest_day_limits").upsert(rows, { onConflict: "week_start,rest_date" });
+    const invalidRow = rows.find((row) => row.max_slots < (usedLimits[`${row.team_id}:${row.rest_date}`] ?? 0));
+    if (invalidRow) {
+      const teamName = teams.find((team) => team.id === invalidRow.team_id)?.name ?? "该小队";
+      setMessage(`${teamName} ${invalidRow.rest_date} 的名额不能低于已排休人数`);
+      return;
+    }
+    const { error } = await supabase.from("rest_day_limits").upsert(rows, { onConflict: "week_id,team_id,rest_date" });
     if (error) { setMessage(error.message); return; }
     setMessage("名额已保存");
   }
@@ -302,37 +355,64 @@ export default function WeekEditPage() {
         </section>
       ) : null}
 
-      {/* 每日休息名额 */}
-      {weekDays.length > 0 ? (
+      {/* 分小队每日休息名额 */}
+      {weekDays.length > 0 && teams.length > 0 ? (
         <section className="admin-section">
           <div className="section-header">
             <div>
-              <h2>每日休息名额配额</h2>
-              <p>设置每天的排休名额上限</p>
+              <h2>小队排休名额</h2>
+              <p>{teams.length === 1 && teams[0].is_default ? "当前使用默认小队" : `已识别 ${teams.length} 个小队`}，名额按小队分别计算</p>
             </div>
+            <button className="btn-primary btn-sm" type="button" onClick={saveAllLimits}>保存名额</button>
           </div>
-          <div className="config-grid">
-            {weekDays.map((day) => {
-              const maxSlots = limits[day.key] ?? getDefaultLimit(day.key);
-              return (
-                <div className="config-card" key={day.key} style={{ flexDirection: "row", alignItems: "center" }}>
-                  <div style={{ flex: 1 }}>
-                    <strong>{day.weekdayLabel}</strong>
-                    <span style={{ fontSize: "12px", color: "var(--text-muted)", display: "block" }}>{day.shortDate}</span>
-                  </div>
-                  <div style={{ width: "80px" }}>
-                    <input className="clean-input" type="number" min={0} max={50} value={maxSlots}
-                      onChange={(e) => setLimits((cur) => ({ ...cur, [day.key]: Number(e.target.value) }))}
-                      style={{ padding: "8px", textAlign: "center" }} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          <div style={{ marginTop: "16px", display: "flex", justifyContent: "flex-end" }}>
-            <button className="btn-primary" type="button" onClick={saveAllLimits}>
-              保存
-            </button>
+          <div className="quota-table-wrap">
+            <table className="quota-table">
+              <thead>
+                <tr>
+                  <th>小队</th>
+                  {weekDays.map((day) => (
+                    <th key={day.key}>
+                      <strong>{day.weekdayLabel}</strong>
+                      <span>{day.shortDate}</span>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {teams.map((team) => (
+                  <tr key={team.id}>
+                    <th>
+                      <strong>{team.name}</strong>
+                      <span>{riders.filter((rider) => rider.team_id === team.id).length} 人</span>
+                    </th>
+                    {weekDays.map((day) => {
+                      const key = `${team.id}:${day.key}`;
+                      const used = usedLimits[key] ?? 0;
+                      const maxSlots = limits[key] ?? getDefaultLimit(day.key);
+                      return (
+                        <td key={day.key}>
+                          <input
+                            aria-label={`${team.name} ${day.weekdayLabel}排休名额`}
+                            className="quota-input"
+                            type="number"
+                            min={used}
+                            max={50}
+                            value={maxSlots}
+                            onChange={(event) => setLimits((current) => ({
+                              ...current,
+                              [key]: Number(event.target.value),
+                            }))}
+                          />
+                          <span className={used >= maxSlots ? "quota-usage quota-full" : "quota-usage"}>
+                            已用 {used}/{maxSlots}
+                          </span>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </section>
       ) : null}
