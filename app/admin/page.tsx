@@ -543,7 +543,7 @@ export default function AdminPage() {
     async function load() {
       setLoadingWeeks(true);
       const [weeksRes, teamsRes, snapshotsRes] = await Promise.all([
-        supabase.from("schedule_weeks").select("*").order("start_date", { ascending: false }),
+        supabase.from("schedule_weeks").select("*").order("created_at", { ascending: false }),
         supabase.from("schedule_teams").select("week_id"),
         supabase.from("week_import_snapshots").select("week_id"),
       ]);
@@ -604,7 +604,7 @@ export default function AdminPage() {
     const channel = supabase
       .channel(`admin-sync-${activeWeek?.id ?? "none"}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "schedule_weeks" }, async () => {
-        const { data } = await supabase.from("schedule_weeks").select("*").order("start_date", { ascending: false });
+        const { data } = await supabase.from("schedule_weeks").select("*").order("created_at", { ascending: false });
         if (data) {
           setWeeks(data);
           setActiveWeek((cur) => data.find((w) => w.id === cur?.id) ?? data.find((w) => w.is_active) ?? data[0] ?? null);

@@ -6,6 +6,8 @@ export type ScheduleWeekRow = {
   is_active: boolean;
   required_slots: number;
   default_slot_ids: string[] | null;
+  created_at?: string;
+  updated_at?: string;
 };
 
 export type TimeSlotRow = {
