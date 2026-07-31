@@ -129,7 +129,7 @@ export default function WeekEditPage() {
       start_date: week.start_date,
       end_date: week.end_date,
       is_active: week.is_active,
-      required_slots: week.required_slots ?? 3,
+      required_slots: week.required_slots ?? 1,
       default_slot_ids: week.default_slot_ids,
     }).eq("id", weekId);
     if (error) { setMessage(error.message); return; }
@@ -275,7 +275,7 @@ export default function WeekEditPage() {
           <div className="slot-policy-bar">
             <label className="required-slot-control">
               <span>每人每天必须选</span>
-              <input className="clean-input" type="number" min={0} max={10} value={week.required_slots ?? 3}
+              <input className="clean-input" type="number" min={0} max={10} value={week.required_slots ?? 1}
                 onChange={(event) => {
                   const value = event.target.value;
                   setWeek((current) => current ? { ...current, required_slots: value === "" ? 0 : Number(value) } : null);
@@ -283,7 +283,7 @@ export default function WeekEditPage() {
                 onBlur={(event) => {
                   const value = Number(event.target.value);
                   if (!Number.isInteger(value) || value < 0 || value > 10) {
-                    setWeek((current) => current ? { ...current, required_slots: 3 } : null);
+                    setWeek((current) => current ? { ...current, required_slots: 1 } : null);
                     setMessage("必选时段数需在 0 到 10 之间");
                     return;
                   }
@@ -298,7 +298,7 @@ export default function WeekEditPage() {
             </label>
             <div className="default-slot-status">
               <span>默认时段</span>
-              <strong>{week.default_slot_ids?.length ?? 0}/{week.required_slots ?? 3}</strong>
+              <strong>{week.default_slot_ids?.length ?? 0}/{week.required_slots ?? 1}</strong>
             </div>
           </div>
           {slots.length > 0 ? (

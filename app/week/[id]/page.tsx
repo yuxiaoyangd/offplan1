@@ -77,7 +77,7 @@ export default function WeekSchedulePage() {
     () => allSlots.filter((slot) => slot.is_selectable && slot.is_active).sort((a, b) => a.sort_order - b.sort_order),
     [allSlots],
   );
-  const requiredSlots = week?.required_slots ?? 3;
+  const requiredSlots = week?.required_slots ?? 1;
   const weekDays = useMemo(
     () => week ? buildDaysFromRange(week.start_date, week.end_date) : [],
     [week],

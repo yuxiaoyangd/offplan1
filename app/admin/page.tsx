@@ -64,7 +64,7 @@ function createDraftWeek(): ScheduleWeekRow {
     start_date: formatDateKey(monday),
     end_date: formatDateKey(sunday),
     is_active: true,
-    required_slots: 3,
+    required_slots: 1,
     default_slot_ids: null,
   };
 }
@@ -659,7 +659,7 @@ export default function AdminPage() {
       start_date: week.start_date,
       end_date: week.end_date,
       is_active: week.is_active,
-      required_slots: week.required_slots ?? 3,
+      required_slots: week.required_slots ?? 1,
       default_slot_ids: week.default_slot_ids,
     };
     const { data, error } = await supabase.from("schedule_weeks").upsert(payload).select("id").single();
@@ -735,7 +735,7 @@ export default function AdminPage() {
       start_date: newWeekStart,
       end_date: newWeekEnd,
       is_active: true,
-      required_slots: 3,
+      required_slots: 1,
     }).select().single();
     setCreating(false);
     if (error) {
