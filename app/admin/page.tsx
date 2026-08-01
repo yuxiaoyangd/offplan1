@@ -28,14 +28,6 @@ type RiderStatus = {
   preferenceMode: RiderRow["rest_preference_mode"];
 };
 
-const QUICK_FILTER_LABELS: Record<QuickFilterKey, string> = {
-  random: "随机待安排",
-  unselected: "未选择待安排",
-  noRest: "缺排休",
-  incomplete: "时段不足",
-  untouched: "未生成",
-};
-
 function areStringSetsEqual(a: Set<string>, b: Set<string>): boolean {
   if (a.size !== b.size) return false;
   for (const value of a) {
@@ -188,6 +180,26 @@ export default function AdminPage() {
     return teams.map((team) => ({ id: team.id, name: team.name }));
   }, [teams]);
 
+  const restedRiderCount = useMemo(
+    () => weekRiders.filter((rider) => riderStatusMap[rider.rider_id]?.hasRest).length,
+    [riderStatusMap, weekRiders],
+  );
+
+  const configuredRestSlotCount = useMemo(
+    () => Object.values(limits).reduce((total, limit) => total + limit, 0),
+    [limits],
+  );
+
+  const teamAutoFillCounts = useMemo(() => teams.map((team) => ({
+    id: team.id,
+    name: team.name,
+    riderCount: weekRiders.filter((rider) => {
+      if (rider.team_id !== team.id) return false;
+      const status = riderStatusMap[rider.rider_id];
+      return !status || !status.hasRest || status.missingDays > 0;
+    }).length,
+  })), [riderStatusMap, teams, weekRiders]);
+
   const restCounts = useMemo(() => {
     const counts: Record<string, { used: number; limit: number }> = {};
     const visibleTeams = groupFilter
@@ -337,8 +349,6 @@ export default function AdminPage() {
     }
   }, []);
 
-  const selectedRiderArray = useMemo(() => Array.from(selectedRiderIds), [selectedRiderIds]);
-
   useEffect(() => {
     if (!masterSelectRef.current) return;
     const totalRows = filteredRequestSummaries.length;
@@ -448,6 +458,14 @@ export default function AdminPage() {
     if (!activeWeek) return;
     if (weekRiders.length === 0) {
       setMessage("当前排班周没有骑手，请先导入数据");
+      return;
+    }
+    const hasMissingSchedules = weekRiders.some((rider) => {
+      const status = riderStatusMap[rider.rider_id];
+      return !status || !status.hasRest || status.missingDays > 0;
+    });
+    if (!hasMissingSchedules) {
+      setMessage("当前排班已完成，没有缺失了");
       return;
     }
     const validSlotIds = new Set(selectableSlots.map((slot) => slot.id));
@@ -929,14 +947,27 @@ export default function AdminPage() {
       {/* 排班总览 */}
       {activeWeek ? (
         <section className="admin-section">
-          <div className="section-header">
+          <div className="section-header overview-section-header">
             <div>
               <h2>排班总览</h2>
-              <p>
-                {formatWeekRange(activeWeek.start_date, activeWeek.end_date)}
-                {overviewReady ? ` · 总人数 ${weekRiders.length} · 已排班 ${namesWithShifts.size}` : " · 加载中..."}
-              </p>
+              <p>{formatWeekRange(activeWeek.start_date, activeWeek.end_date)}</p>
             </div>
+            {overviewReady ? (
+              <div className="overview-quick-stats">
+                <div className="overview-stat">
+                  <span>已排班</span>
+                  <strong>{namesWithShifts.size}/{weekRiders.length}</strong>
+                </div>
+                <div className="overview-stat">
+                  <span>已排休</span>
+                  <strong>{restedRiderCount}/{weekRiders.length}</strong>
+                </div>
+                <div className={`overview-stat ${configuredRestSlotCount === weekRiders.length ? "" : "mismatch"}`}>
+                  <span>已配置休息名额</span>
+                  <strong>{configuredRestSlotCount}/{weekRiders.length}</strong>
+                </div>
+              </div>
+            ) : <span className="overview-header-loading">加载中...</span>}
           </div>
           {!overviewReady ? (
             <div className="overview-loading" role="status" aria-live="polite">
@@ -945,38 +976,37 @@ export default function AdminPage() {
             </div>
           ) : (
             <>
-          {weekRiders.length > 0 ? (
-            <>
-              <div className="member-tags">
-                {weekRiders.map((r) => (
-                  <span key={r.rider_id} className={`member-tag ${namesWithShifts.has(r.rider_id) ? "" : "member-tag-pending"}`}>
-                    {r.name}
-                  </span>
-                ))}
-              </div>
-            </>
-          ) : <p style={{ fontSize: "14px", color: "var(--text-muted)" }}>暂无骑手名单，请导入 XLS</p>}
+          {weekRiders.length === 0 ? <p style={{ fontSize: "14px", color: "var(--text-muted)" }}>暂无骑手名单，请导入 XLS</p> : null}
 
           {requestSummaries.length > 0 ? (
             <>
               <div className={`bulk-panel ${showAdvancedTools ? "expanded" : "collapsed"}`}>
                 <div className="bulk-panel-top">
-                  <div className="selection-meta">
-                    <div>
-                      <strong>{selectedRiderArray.length}</strong> / {filteredRequestSummaries.length} 已选
-                    </div>
-                    {quickFilter ? (
-                      <button
-                        className="chip chip-active"
-                        type="button"
-                        onClick={() => applyQuickFilter(quickFilter)}
-                      >
-                        {QUICK_FILTER_LABELS[quickFilter]}
-                      </button>
-                    ) : null}
-                    <button className="btn-secondary btn-sm" type="button" onClick={resetSelection} disabled={selectedRiderArray.length === 0}>清除选择</button>
+                  <div className="bulk-panel-label">
+                    <strong>排班工具</strong>
+                    <span>筛选与批量处理</span>
                   </div>
-                  <div className="filter-chips">
+                  <div className="admin-tools-actions">
+                    <button
+                      className="btn-primary btn-sm"
+                      type="button"
+                      onClick={requestCompleteWeek}
+                      disabled={completeLoading}
+                    >
+                      {completeLoading ? "处理中..." : "自动补全排班"}
+                    </button>
+                    <button
+                      className="btn-secondary btn-sm"
+                      type="button"
+                      aria-expanded={showAdvancedTools}
+                      onClick={() => setShowAdvancedTools((current) => !current)}
+                    >
+                      {showAdvancedTools ? "收起" : "展开更多"}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="filter-chips">
                     {([
                       { key: "random", label: "随机待安排" },
                       { key: "unselected", label: "未选择待安排" },
@@ -1005,25 +1035,6 @@ export default function AdminPage() {
                         return !status || status.missingDays > 0;
                       }).length}）</small>
                     </button>
-                  </div>
-                  <div className="admin-tools-actions">
-                    <button
-                      className="btn-primary btn-sm"
-                      type="button"
-                      onClick={requestCompleteWeek}
-                      disabled={completeLoading}
-                    >
-                      {completeLoading ? "处理中..." : "自动补全排班"}
-                    </button>
-                    <button
-                      className="btn-secondary btn-sm"
-                      type="button"
-                      aria-expanded={showAdvancedTools}
-                      onClick={() => setShowAdvancedTools((current) => !current)}
-                    >
-                      {showAdvancedTools ? "收起" : "展开更多"}
-                    </button>
-                  </div>
                 </div>
 
                 <div className="filter-bar">
@@ -1257,8 +1268,16 @@ export default function AdminPage() {
           <div className="confirm-card" onClick={(event) => event.stopPropagation()}>
             <h2>确认自动补全排班</h2>
             <p className="complete-confirm-copy">
-              系统将保留已有选择，用默认时段补足每天缺少的数量，并按各小队剩余名额为所有缺少排休的骑手自动安排休息日。
+              系统会保留已提交的出勤时段和排休信息，并按当前配置完成剩余排班。
             </p>
+            <div className="complete-team-summary">
+              <span className="team-autofill-title">自动补全</span>
+              <div className="team-autofill-items">
+                {teamAutoFillCounts.map((team) => (
+                  <span key={team.id}><strong>{team.name}</strong> {team.riderCount} 人</span>
+                ))}
+              </div>
+            </div>
             <div className="card-actions-row">
               <button className="btn-ghost" type="button" onClick={() => setShowCompleteConfirm(false)} disabled={completeLoading}>取消</button>
               <button className="btn-primary" type="button" onClick={() => void handleCompleteWeek()} disabled={completeLoading}>

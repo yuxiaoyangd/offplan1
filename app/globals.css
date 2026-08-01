@@ -363,12 +363,12 @@ select {
 .bulk-panel {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 14px;
   margin-bottom: 20px;
-  background: linear-gradient(135deg, rgba(15, 23, 42, 0.04) 0%, rgba(15, 23, 42, 0.02) 100%);
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  border-radius: 18px;
-  padding: 20px 24px;
+  background: #f8fafc;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 16px;
 }
 
 .bulk-panel-top {
@@ -384,18 +384,20 @@ select {
   max-width: 100%;
 }
 
-.selection-meta {
+.bulk-panel-label {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-  font-size: 14px;
-  color: var(--text-muted);
+  flex-direction: column;
+  gap: 2px;
 }
 
-.selection-meta strong {
-  font-size: 16px;
+.bulk-panel-label strong {
   color: var(--text-main);
+  font-size: 14px;
+}
+
+.bulk-panel-label span {
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
 .filter-chips {
@@ -473,6 +475,23 @@ select {
 }
 
 @media (max-width: 680px) {
+  .overview-quick-stats {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr;
+    margin-left: 0;
+  }
+
+  .overview-stat {
+    min-width: 0;
+  }
+
+  .complete-team-summary {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+
   .admin-tools-actions {
     width: 100%;
     display: grid;
@@ -816,6 +835,56 @@ select {
   border: 1px solid var(--border-color);
 }
 
+.overview-section-header {
+  align-items: center;
+}
+
+.overview-quick-stats {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.overview-stat {
+  min-width: 128px;
+  padding: 9px 12px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--surface-muted);
+}
+
+.overview-stat span {
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.overview-stat strong {
+  color: var(--text-main);
+  font-size: 16px;
+  white-space: nowrap;
+}
+
+.overview-stat.mismatch {
+  border-color: #fca5a5;
+  background: #fef2f2;
+}
+
+.overview-stat.mismatch span,
+.overview-stat.mismatch strong {
+  color: #b91c1c;
+}
+
+.overview-header-loading {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
 .overview-loading {
   min-height: 220px;
   display: flex;
@@ -1026,33 +1095,37 @@ select {
   font-weight: 500;
 }
 
-/* 总览中的人员标签 */
-.member-tags {
+.complete-team-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin: -4px 0 20px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.team-autofill-title {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.team-autofill-items {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 16px;
+  gap: 6px 20px;
 }
 
-.member-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 12px;
-  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
-  color: #2563eb;
-  border-radius: 8px;
+.team-autofill-items span {
+  color: var(--text-muted);
   font-size: 13px;
-  font-weight: 600;
-  border: 1px solid #bfdbfe;
-  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.1);
 }
 
-.member-tag-pending {
-  background: #f1f5f9;
-  color: #64748b;
-  border-color: #e2e8f0;
-  box-shadow: 0 1px 2px rgba(100, 116, 139, 0.1);
+.team-autofill-items strong {
+  color: var(--text-main);
 }
 
 
