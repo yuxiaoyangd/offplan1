@@ -81,6 +81,8 @@ export default function AdminPage() {
   const [slots, setSlots] = useState<TimeSlotRow[]>([]);
   const [schedules, setSchedules] = useState<RiderScheduleRow[]>([]);
   const [limits, setLimits] = useState<Record<string, number>>({});
+  const [overviewLoading, setOverviewLoading] = useState(false);
+  const [loadedOverviewWeekId, setLoadedOverviewWeekId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   const [selectedRiderIds, setSelectedRiderIds] = useState<Set<string>>(() => new Set());
@@ -106,7 +108,11 @@ export default function AdminPage() {
   const [importWeek, setImportWeek] = useState<ScheduleWeekRow | null>(null);
   const [exportingWeekId, setExportingWeekId] = useState<string | null>(null);
   const masterSelectRef = useRef<HTMLInputElement | null>(null);
+  const activeWeekIdRef = useRef<string | null>(null);
+  const overviewRequestRef = useRef(0);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
+
+  activeWeekIdRef.current = activeWeek?.id ?? null;
 
   const weekDays = useMemo(() => {
     if (!activeWeek) return [];
@@ -568,7 +574,29 @@ export default function AdminPage() {
   }, []);
 
   useEffect(() => {
-    if (!activeWeek) { setSlots([]); setSchedules([]); setLimits({}); setRiderMap({}); setTeams([]); return; }
+    const requestId = ++overviewRequestRef.current;
+    let cancelled = false;
+
+    resetSelection();
+    setQuickFilter(null);
+    setShowPendingOnly(false);
+    setSearchText("");
+    setGroupFilter("");
+    setApplySlotId("");
+    setBulkRestDate("");
+    setLoadedOverviewWeekId(null);
+
+    if (!activeWeek) {
+      setSlots([]);
+      setSchedules([]);
+      setLimits({});
+      setRiderMap({});
+      setTeams([]);
+      setOverviewLoading(false);
+      return () => { cancelled = true; };
+    }
+
+    setOverviewLoading(true);
     const curWeek = activeWeek;
     async function loadWeek() {
       const [slotsRes, schedulesRes, limitsRes, ridersRes, teamsRes] = await Promise.all([
@@ -578,21 +606,25 @@ export default function AdminPage() {
         supabase.from("riders").select("*").eq("week_id", curWeek.id),
         supabase.from("schedule_teams").select("*").eq("week_id", curWeek.id).order("name"),
       ]);
-      if (slotsRes.data) setSlots(slotsRes.data);
-      if (schedulesRes.data) setSchedules(schedulesRes.data);
-      if (limitsRes.data) {
-        setLimits(limitsRes.data.reduce<Record<string, number>>((acc, row) => {
+      if (cancelled || requestId !== overviewRequestRef.current || activeWeekIdRef.current !== curWeek.id) return;
+
+      setSlots(slotsRes.data ?? []);
+      setSchedules(schedulesRes.data ?? []);
+      setLimits((limitsRes.data ?? []).reduce<Record<string, number>>((acc, row) => {
           acc[`${row.team_id}:${row.rest_date}`] = row.max_slots;
           return acc;
         }, {}));
-      }
-      if (ridersRes.data) {
-        setRiderMap(ridersRes.data.reduce<Record<string, RiderRow>>((acc, r) => { acc[r.rider_id] = r; return acc; }, {}));
-      }
-      if (teamsRes.data) setTeams(teamsRes.data);
+      setRiderMap((ridersRes.data ?? []).reduce<Record<string, RiderRow>>((acc, r) => { acc[r.rider_id] = r; return acc; }, {}));
+      setTeams(teamsRes.data ?? []);
+      setLoadedOverviewWeekId(curWeek.id);
+      setOverviewLoading(false);
+
+      const loadError = slotsRes.error ?? schedulesRes.error ?? limitsRes.error ?? ridersRes.error ?? teamsRes.error;
+      if (loadError) setMessage(`排班总览加载失败：${loadError.message}`);
     }
     void loadWeek();
-  }, [activeWeek]);
+    return () => { cancelled = true; };
+  }, [activeWeek, resetSelection]);
 
   useEffect(() => {
     if (!message) return;
@@ -613,17 +645,17 @@ export default function AdminPage() {
       .on("postgres_changes", { event: "*", schema: "public", table: "time_slots" }, async () => {
         if (!activeWeek) return;
         const { data } = await supabase.from("time_slots").select("*").eq("week_id", activeWeek.id).order("sort_order");
-        if (data) setSlots(data);
+        if (data && activeWeekIdRef.current === activeWeek.id) setSlots(data);
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "rider_schedules", filter: activeWeek ? `week_id=eq.${activeWeek.id}` : undefined }, async () => {
         if (!activeWeek) return;
         const { data } = await supabase.from("rider_schedules").select("*").eq("week_id", activeWeek.id);
-        if (data) setSchedules(data);
+        if (data && activeWeekIdRef.current === activeWeek.id) setSchedules(data);
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "rest_day_limits", filter: activeWeek ? `week_id=eq.${activeWeek.id}` : undefined }, async () => {
         if (!activeWeek) return;
         const { data } = await supabase.from("rest_day_limits").select("team_id,rest_date,max_slots").eq("week_id", activeWeek.id);
-        if (data) setLimits(data.reduce<Record<string, number>>((acc, row) => {
+        if (data && activeWeekIdRef.current === activeWeek.id) setLimits(data.reduce<Record<string, number>>((acc, row) => {
           acc[`${row.team_id}:${row.rest_date}`] = row.max_slots;
           return acc;
         }, {}));
@@ -631,12 +663,12 @@ export default function AdminPage() {
       .on("postgres_changes", { event: "*", schema: "public", table: "riders", filter: activeWeek ? `week_id=eq.${activeWeek.id}` : undefined }, async () => {
         if (!activeWeek) return;
         const { data } = await supabase.from("riders").select("*").eq("week_id", activeWeek.id);
-        if (data) setRiderMap(data.reduce<Record<string, RiderRow>>((acc, r) => { acc[r.rider_id] = r; return acc; }, {}));
+        if (data && activeWeekIdRef.current === activeWeek.id) setRiderMap(data.reduce<Record<string, RiderRow>>((acc, r) => { acc[r.rider_id] = r; return acc; }, {}));
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "schedule_teams", filter: activeWeek ? `week_id=eq.${activeWeek.id}` : undefined }, async () => {
         if (!activeWeek) return;
         const { data } = await supabase.from("schedule_teams").select("*").eq("week_id", activeWeek.id).order("name");
-        if (data) {
+        if (data && activeWeekIdRef.current === activeWeek.id) {
           setTeams(data);
           setTeamCountsByWeek((current) => ({ ...current, [activeWeek.id]: data.length }));
         }
@@ -752,6 +784,12 @@ export default function AdminPage() {
     }
   }
 
+  const overviewReady = Boolean(
+    activeWeek
+    && !overviewLoading
+    && loadedOverviewWeekId === activeWeek.id,
+  );
+
   return (
     <main className="page-container admin-page">
       {importWeek ? (
@@ -763,6 +801,8 @@ export default function AdminPage() {
             setImportedWeekIds((current) => new Set(current).add(importWeek.id));
             setImportWeek(null);
             if (activeWeek?.id === importWeek.id) {
+              setOverviewLoading(true);
+              setLoadedOverviewWeekId(null);
               setActiveWeek({ ...activeWeek });
             }
           }}
@@ -803,6 +843,10 @@ export default function AdminPage() {
                 style={{ position: "relative", cursor: "pointer" }}
                 onClick={(e) => {
                   if (!(e.target as HTMLElement).closest("button") && !(e.target as HTMLElement).closest("input")) {
+                    if (activeWeek?.id !== week.id) {
+                      setOverviewLoading(true);
+                      setLoadedOverviewWeekId(null);
+                    }
                     setActiveWeek(week);
                     localStorage.setItem("admin-selected-week-id", week.id);
                   }
@@ -879,9 +923,19 @@ export default function AdminPage() {
           <div className="section-header">
             <div>
               <h2>排班总览</h2>
-              <p>{activeWeek ? formatWeekRange(activeWeek.start_date, activeWeek.end_date) : "未选择周"} · 总人数 {weekRiders.length} · 已排班 {namesWithShifts.size}</p>
+              <p>
+                {formatWeekRange(activeWeek.start_date, activeWeek.end_date)}
+                {overviewReady ? ` · 总人数 ${weekRiders.length} · 已排班 ${namesWithShifts.size}` : " · 加载中..."}
+              </p>
             </div>
           </div>
+          {!overviewReady ? (
+            <div className="overview-loading" role="status" aria-live="polite">
+              <div className="spinner" aria-hidden="true" />
+              <span>正在加载该排班周的总览</span>
+            </div>
+          ) : (
+            <>
           {weekRiders.length > 0 ? (
             <>
               <div className="member-tags">
@@ -1184,6 +1238,8 @@ export default function AdminPage() {
             )}
             </>
           ) : null}
+            </>
+          )}
         </section>
       ) : null}
 
