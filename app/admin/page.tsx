@@ -503,6 +503,12 @@ export default function AdminPage() {
       const toArray = (value: unknown): (string | number | null)[] => (Array.isArray(value) ? value : []);
       const header = toArray(payload.header);
       const slotColSet = new Set(payload.slotColumnIndexes.map((index) => Number(index)));
+      const numericIdColSet = new Set(
+        header
+          .map((cell, index) => ({ label: String(cell ?? "").trim(), index }))
+          .filter(({ label }) => label === "管理组ID" || label === "骑手ID")
+          .map(({ index }) => index),
+      );
       const headerDateIndex = header.findIndex((cell) => String(cell ?? "").trim() === "日期");
       const dateColumnIndex = Number.isInteger(payload.dateColumnIndex)
         ? Number(payload.dateColumnIndex)
@@ -512,28 +518,31 @@ export default function AdminPage() {
         row.map((cell, ci) => {
           if (cell == null) return "";
           if (slotColSet.has(ci) && typeof cell === "string" && (cell === "0" || cell === "1")) return Number(cell);
+          if (numericIdColSet.has(ci)) {
+            const idText = String(cell).trim();
+            const idNumber = Number(idText);
+            if (/^\d+$/.test(idText) && Number.isSafeInteger(idNumber)) return idNumber;
+          }
           if (ci === dateColumnIndex) {
             const digits = String(cell).trim().replace(/\D/g, "");
-            if (digits.length === 8) {
-              const year = Number(digits.slice(0, 4));
-              const month = Number(digits.slice(4, 6));
-              const day = Number(digits.slice(6, 8));
-              return Date.UTC(year, month - 1, day) / 86400000 + 25569;
-            }
+            if (digits.length === 8) return Number(digits);
           }
           return cell;
         })
       );
 
       const worksheet = XLSX.utils.aoa_to_sheet(aoa);
-      for (let rowIndex = 1; rowIndex < aoa.length; rowIndex += 1) {
-        const address = XLSX.utils.encode_cell({ r: rowIndex, c: dateColumnIndex });
-        if (worksheet[address]?.t === "n") {
-          worksheet[address].z = "yyyy-mm-dd";
-        }
-      }
+      worksheet["!cols"] = header.map((_, columnIndex) => {
+        if (columnIndex === 0) return { wch: 12 };
+        if (columnIndex === 1) return { wch: 22 };
+        if (columnIndex === 2) return { wch: 14 };
+        if (columnIndex === 3) return { wch: 9 };
+        if (columnIndex === dateColumnIndex) return { wch: 14 };
+        if (columnIndex < (payload.baseColumns ?? 6)) return { wch: 9 };
+        return { wch: 35 };
+      });
       const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, "排班数据");
+      XLSX.utils.book_append_sheet(workbook, worksheet, "骑手班次");
 
       const fileName = `${week.name || formatWeekRange(week.start_date, week.end_date)}-排班.xls`;
       XLSX.writeFile(workbook, fileName, { bookType: 'xls' });
