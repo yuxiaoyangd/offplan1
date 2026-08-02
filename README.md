@@ -28,6 +28,8 @@ npm run dev
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://wwsndhuaxyswjkfancem.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=你的 publishable key
+CLOUD_RUN_XLS_EXPORT_URL=https://xls-export-890180627519.asia-east1.run.app
+CLOUD_RUN_XLS_EXPORT_KEY=可选，启用 Cloud Run 共享密钥后填写
 ```
 
 ## 3. 页面说明
@@ -47,6 +49,8 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=你的 publishable key
 - 上传小队数据时，两份文档的骑手 ID 和姓名必须完全一致，否则禁止导入。
 - 系统根据小队文件中的“分组ID”和“分组名称”自动创建小队。
 - 每个小队拥有独立的每日排休名额。
+- 导入时会把当周原始 Excel 保存到 Supabase Storage，供兼容导出使用。
+- 已有数据库请先在 Supabase SQL Editor 执行 `supabase/xls_export_migration.sql`。
 
 ## 5. 当前 MVP 约束
 
@@ -57,4 +61,4 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=你的 publishable key
 
 ## 6. 部署
 
-直接推送到 GitHub 后导入 Vercel，配置同样的环境变量即可。
+直接推送到 GitHub 后导入 Vercel，配置同样的环境变量即可。导出时会优先调用 Cloud Run 生成可直接上传排班系统的文件；服务不可用时自动使用原有导出方式。

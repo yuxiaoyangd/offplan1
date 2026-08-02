@@ -17,6 +17,7 @@ import type {
 
 const DEFAULT_WEEKDAY_LIMIT = 5;
 const DEFAULT_WEEKEND_LIMIT = 2;
+const XLS_MIME_TYPE = "application/vnd.ms-excel";
 
 type BulkActionType = "apply-default" | "apply-slot" | "set-rest" | "clear-rest" | "clear-schedules";
 type QuickFilterKey = "random" | "unselected" | "noRest" | "incomplete" | "untouched";
@@ -59,6 +60,34 @@ function createDraftWeek(): ScheduleWeekRow {
     required_slots: 1,
     default_slot_ids: null,
   };
+}
+
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("无法读取导出文件"));
+    reader.onload = () => {
+      const result = String(reader.result ?? "");
+      const separatorIndex = result.indexOf(",");
+      if (separatorIndex < 0) {
+        reject(new Error("无法转换导出文件"));
+        return;
+      }
+      resolve(result.slice(separatorIndex + 1));
+    };
+    reader.readAsDataURL(blob);
+  });
 }
 
 export default function AdminPage() {
@@ -563,8 +592,32 @@ export default function AdminPage() {
       XLSX.utils.book_append_sheet(workbook, worksheet, "骑手班次");
 
       const fileName = `${week.name || formatWeekRange(week.start_date, week.end_date)}-排班.xls`;
-      XLSX.writeFile(workbook, fileName, { bookType: 'xls' });
-      setMessage(payload.generated ? "导出成功（基于当前排班生成）" : "导出成功（保持导入模板结构）");
+      const sourceBytes = XLSX.write(workbook, { bookType: "xls", type: "array" }) as ArrayBuffer;
+      const fallbackBlob = new Blob([sourceBytes], { type: XLS_MIME_TYPE });
+
+      try {
+        const sourceBase64 = await blobToBase64(fallbackBlob);
+        const compatibleResponse = await fetch("/api/export-xls", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            weekId: week.id,
+            fileName,
+            sourceBase64,
+          }),
+        });
+
+        if (!compatibleResponse.ok) {
+          throw new Error("兼容文件生成失败");
+        }
+
+        const compatibleBlob = await compatibleResponse.blob();
+        downloadBlob(compatibleBlob, fileName);
+        setMessage("导出成功，可直接上传至排班系统。");
+      } catch {
+        downloadBlob(fallbackBlob, fileName);
+        setMessage("文件已导出，但不能保证直接上传。请将出勤结果复制到系统原文档后再上传。");
+      }
     } catch (err: unknown) {
       setMessage(`导出失败：${err instanceof Error ? err.message : "未知错误"}`);
     } finally {

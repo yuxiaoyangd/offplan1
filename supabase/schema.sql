@@ -128,6 +128,8 @@ create table public.week_import_snapshots (
   base_columns integer not null,
   slot_labels jsonb not null,
   slot_indexes jsonb not null,
+  original_file_path text,
+  original_file_name text,
   created_at timestamptz not null default now()
 );
 
@@ -1747,6 +1749,40 @@ grant execute on function public.set_week_required_slots to anon, authenticated;
 grant execute on function public.set_week_default_slots to anon, authenticated;
 grant execute on function public.bulk_set_rider_rest to anon, authenticated;
 grant execute on function public.bulk_clear_rider_rest to anon, authenticated;
+
+-- 原始 XLS 模板存储（私有桶，通过 RLS 允许当前 MVP 客户端读写）
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'xls-templates',
+  'xls-templates',
+  false,
+  10485760,
+  array[
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/octet-stream'
+  ]::text[]
+)
+on conflict (id) do update set
+  public = excluded.public,
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "xls templates select" on storage.objects;
+drop policy if exists "xls templates insert" on storage.objects;
+drop policy if exists "xls templates delete" on storage.objects;
+
+create policy "xls templates select"
+on storage.objects for select to anon, authenticated
+using (bucket_id = 'xls-templates');
+
+create policy "xls templates insert"
+on storage.objects for insert to anon, authenticated
+with check (bucket_id = 'xls-templates');
+
+create policy "xls templates delete"
+on storage.objects for delete to anon, authenticated
+using (bucket_id = 'xls-templates');
 grant execute on function public.bulk_apply_default_slots to anon, authenticated;
 grant execute on function public.complete_week_schedules(uuid) to anon, authenticated;
 grant execute on function public.bulk_clear_rider_schedules to anon, authenticated;

@@ -12,8 +12,25 @@ import type {
 
 type ParsedFile<T> = {
   fileName: string;
+  file: File;
   data: T;
 };
+
+const XLS_TEMPLATE_BUCKET = "xls-templates";
+
+function getExcelContentType(fileName: string): string {
+  return fileName.toLowerCase().endsWith(".xlsx")
+    ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    : "application/vnd.ms-excel";
+}
+
+function createOriginalFilePath(weekId: string, fileName: string): string {
+  const extension = fileName.toLowerCase().endsWith(".xlsx") ? "xlsx" : "xls";
+  const uniqueId = typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  return `${weekId}/${uniqueId}.${extension}`;
+}
 
 type ImportWeekDialogProps = {
   week: ScheduleWeekRow;
@@ -88,7 +105,7 @@ export default function ImportWeekDialog({ week, onClose, onImported }: ImportWe
     setParseError(null);
     try {
       const data = parseXlsFile(await file.arrayBuffer());
-      setPreferenceFile({ fileName: file.name, data });
+      setPreferenceFile({ fileName: file.name, file, data });
     } catch (error) {
       setPreferenceFile(null);
       setParseError(error instanceof Error ? error.message : "无法解析时段意愿文档");
@@ -100,7 +117,7 @@ export default function ImportWeekDialog({ week, onClose, onImported }: ImportWe
     setParseError(null);
     try {
       const data = parseRiderTeamFile(await file.arrayBuffer());
-      setTeamFile({ fileName: file.name, data });
+      setTeamFile({ fileName: file.name, file, data });
     } catch (error) {
       setTeamFile(null);
       setParseError(error instanceof Error ? error.message : "无法解析骑手小队数据");
@@ -112,25 +129,78 @@ export default function ImportWeekDialog({ week, onClose, onImported }: ImportWe
     setImporting(true);
     setParseError(null);
 
-    const payload = {
-      ...preferenceFile.data,
-      teams: teamFile?.data.teams ?? [],
-      riderTeams: teamFile?.data.assignments ?? [],
-    };
-    const { data, error } = await supabase.rpc("import_xls_week", {
-      p_week_id: week.id,
-      p_data: payload,
-    });
+    const originalFilePath = createOriginalFilePath(week.id, preferenceFile.fileName);
+    let uploadedFilePath: string | null = null;
+    let dataImported = false;
 
-    setImporting(false);
-    if (error) {
-      setParseError(error.message);
-      return;
+    try {
+      const { data: previousSnapshot, error: previousSnapshotError } = await supabase
+        .from("week_import_snapshots")
+        .select("original_file_path")
+        .eq("week_id", week.id)
+        .maybeSingle();
+
+      if (previousSnapshotError) throw previousSnapshotError;
+
+      const { error: uploadError } = await supabase.storage
+        .from(XLS_TEMPLATE_BUCKET)
+        .upload(originalFilePath, preferenceFile.file, {
+          contentType: getExcelContentType(preferenceFile.fileName),
+          upsert: false,
+        });
+
+      if (uploadError) {
+        throw new Error(`原始文件保存失败：${uploadError.message}`);
+      }
+      uploadedFilePath = originalFilePath;
+
+      const payload = {
+        ...preferenceFile.data,
+        teams: teamFile?.data.teams ?? [],
+        riderTeams: teamFile?.data.assignments ?? [],
+      };
+      const { data, error } = await supabase.rpc("import_xls_week", {
+        p_week_id: week.id,
+        p_data: payload,
+      });
+
+      if (error) throw error;
+      dataImported = true;
+
+      const { error: snapshotUpdateError } = await supabase
+        .from("week_import_snapshots")
+        .update({
+          original_file_path: originalFilePath,
+          original_file_name: preferenceFile.fileName,
+        })
+        .eq("week_id", week.id);
+
+      if (snapshotUpdateError) throw snapshotUpdateError;
+
+      const previousFilePath = typeof previousSnapshot?.original_file_path === "string"
+        ? previousSnapshot.original_file_path
+        : null;
+      if (previousFilePath && previousFilePath !== originalFilePath) {
+        await supabase.storage.from(XLS_TEMPLATE_BUCKET).remove([previousFilePath]);
+      }
+
+      uploadedFilePath = null;
+      const teamCount = Number(data?.teamCount ?? (teamFile?.data.teams.length || 1));
+      const riderCount = Number(data?.riderCount ?? preferenceFile.data.riders.length);
+      onImported(`导入成功：${riderCount} 名骑手，${teamCount} 个小队`);
+    } catch (error) {
+      console.error("Importing schedule workbook failed", error);
+      if (uploadedFilePath) {
+        await supabase.storage.from(XLS_TEMPLATE_BUCKET).remove([uploadedFilePath]);
+      }
+      if (dataImported) {
+        setParseError("排班数据已导入，但原始文件保存失败，请重新导入一次。");
+      } else {
+        setParseError(error instanceof Error ? error.message : "导入失败，请稍后重试");
+      }
+    } finally {
+      setImporting(false);
     }
-
-    const teamCount = Number(data?.teamCount ?? (teamFile?.data.teams.length || 1));
-    const riderCount = Number(data?.riderCount ?? preferenceFile.data.riders.length);
-    onImported(`导入成功：${riderCount} 名骑手，${teamCount} 个小队`);
   }
 
   return (
