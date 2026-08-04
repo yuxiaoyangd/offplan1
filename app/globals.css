@@ -416,13 +416,23 @@ select:focus-visible,
 @media (max-width: 680px) {
   .overview-quick-stats {
     width: 100%;
-    display: grid;
-    grid-template-columns: 1fr;
+    display: flex;
+    flex-direction: column;
     margin-left: 0;
   }
 
   .overview-stat {
+    flex: 1 1 100%;
     min-width: 0;
+    padding: 6px 10px;
+  }
+
+  .overview-stat span {
+    font-size: 11px;
+  }
+
+  .overview-stat strong {
+    font-size: 15px;
   }
 
   .complete-team-summary {
@@ -688,18 +698,20 @@ select:focus-visible,
 
 .overview-quick-stats {
   display: flex;
+  flex-wrap: wrap;
   align-items: stretch;
-  gap: 8px;
+  gap: 6px;
   margin-left: auto;
 }
 
 .overview-stat {
-  min-width: 128px;
-  padding: 9px 12px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 7px 10px;
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   background: var(--surface-muted);
@@ -709,22 +721,18 @@ select:focus-visible,
   color: var(--text-muted);
   font-size: 12px;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .overview-stat strong {
   color: var(--text-main);
   font-size: 16px;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
-.overview-stat.mismatch {
-  border-color: #fca5a5;
-  background: #fef2f2;
-}
-
-.overview-stat.mismatch span,
 .overview-stat.mismatch strong {
-  color: #b91c1c;
+  color: #dc2626;
 }
 
 .overview-header-loading {
@@ -1513,9 +1521,9 @@ select:focus-visible,
   letter-spacing: 0;
 }
 
-.day-header-rest.full {
-  background: #fef2f2;
+.day-header-rest .rest-full {
   color: #dc2626;
+  font-weight: 700;
 }
 
 /* 骑手状态行（badge 化） */

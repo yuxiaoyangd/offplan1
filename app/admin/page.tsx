@@ -1436,8 +1436,8 @@ export default function AdminPage() {
                         <th key={day.key} className="day-header">
                           <span className="day-header-label">{day.weekdayLabel}</span>
                           <span className="day-header-date">{day.shortDate}</span>
-                          <span className={`day-header-rest ${full ? "full" : ""}`}>
-                            休息日：{rc.used}/{rc.limit}
+                          <span className="day-header-rest">
+                            休息日：<strong className={full ? "rest-full" : ""}>{rc.used}/{rc.limit}</strong>
                           </span>
                         </th>
                       );
