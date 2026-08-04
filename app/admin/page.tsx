@@ -128,6 +128,7 @@ export default function AdminPage() {
   const [creating, setCreating] = useState(false);
   const [importWeek, setImportWeek] = useState<ScheduleWeekRow | null>(null);
   const [exportingWeekId, setExportingWeekId] = useState<string | null>(null);
+  const [exportChoiceWeek, setExportChoiceWeek] = useState<ScheduleWeekRow | null>(null);
   const masterSelectRef = useRef<HTMLInputElement | null>(null);
   const activeWeekIdRef = useRef<string | null>(null);
   const overviewRequestRef = useRef(0);
@@ -625,6 +626,90 @@ export default function AdminPage() {
     }
   }
 
+  async function handleRestPreviewExport(week: ScheduleWeekRow) {
+    setExportingWeekId(week.id);
+    setMessage(null);
+    try {
+      const [ridersRes, schedulesRes, slotsRes] = await Promise.all([
+        supabase.from("riders").select("rider_id,name").eq("week_id", week.id),
+        supabase.from("rider_schedules").select("rider_id,work_date,slot_id,is_selected").eq("week_id", week.id),
+        supabase.from("time_slots").select("id,name,sort_order").eq("week_id", week.id).order("sort_order"),
+      ]);
+      const requestError = ridersRes.error ?? schedulesRes.error ?? slotsRes.error;
+      if (requestError) throw requestError;
+
+      const riders = (ridersRes.data ?? []) as Pick<RiderRow, "rider_id" | "name">[];
+      const weekSchedules = (schedulesRes.data ?? []) as Pick<
+        RiderScheduleRow,
+        "rider_id" | "work_date" | "slot_id" | "is_selected"
+      >[];
+      const weekSlots = (slotsRes.data ?? []) as Pick<TimeSlotRow, "id" | "name" | "sort_order">[];
+      const riderNameMap = new Map(riders.map((rider) => [rider.rider_id, rider.name]));
+      const days = buildDaysFromRange(week.start_date, week.end_date);
+      const byDay = new Map<string, Set<string>>();
+      const bySlot = new Map<string, Set<string>>();
+      const scheduledRiderIds = new Set<string>();
+      const restedRiderIds = new Set<string>();
+
+      for (const schedule of weekSchedules) {
+        const riderName = riderNameMap.get(schedule.rider_id);
+        if (!riderName) continue;
+        if (schedule.slot_id === null) {
+          restedRiderIds.add(schedule.rider_id);
+          const names = byDay.get(schedule.work_date) ?? new Set<string>();
+          names.add(riderName);
+          byDay.set(schedule.work_date, names);
+        } else if (schedule.is_selected) {
+          scheduledRiderIds.add(schedule.rider_id);
+          const names = bySlot.get(schedule.slot_id) ?? new Set<string>();
+          names.add(riderName);
+          bySlot.set(schedule.slot_id, names);
+        }
+      }
+
+      const sortedNames = (names: Set<string>) => Array.from(names).sort((a, b) => a.localeCompare(b, "zh-CN"));
+      const namesText = (names: Set<string>) => {
+        const values = sortedNames(names);
+        return values.length > 0 ? values.join("、") : "无";
+      };
+      const lines = [
+        "排休表预览",
+        `排班周：${week.name || formatWeekRange(week.start_date, week.end_date)}`,
+        `${week.start_date} ~ ${week.end_date}`,
+        "",
+        "按日期排休",
+        ...days.map((day) => {
+          const names = byDay.get(day.key) ?? new Set<string>();
+          return `${day.weekdayLabel}（${names.size}人）：${namesText(names)}`;
+        }),
+        "",
+        "按时段排班",
+        ...weekSlots.map((slot) => {
+          const names = bySlot.get(slot.id) ?? new Set<string>();
+          return `${slot.name}（${names.size}人）：${namesText(names)}`;
+        }),
+        "",
+        "未完成项目",
+        (() => {
+          const names = riders.filter((rider) => !scheduledRiderIds.has(rider.rider_id) && !restedRiderIds.has(rider.rider_id));
+          return `暂未排班（${names.length}人）：${names.length ? names.map((rider) => rider.name).sort((a, b) => a.localeCompare(b, "zh-CN")).join("、") : "无"}`;
+        })(),
+        (() => {
+          const names = riders.filter((rider) => !restedRiderIds.has(rider.rider_id));
+          return `暂未排休（${names.length}人）：${names.length ? names.map((rider) => rider.name).sort((a, b) => a.localeCompare(b, "zh-CN")).join("、") : "无"}`;
+        })(),
+      ];
+      const blob = new Blob([`\uFEFF${lines.join("\r\n")}`], { type: "text/plain;charset=utf-8" });
+      const fileName = `${week.name || formatWeekRange(week.start_date, week.end_date)}-排休表预览.txt`;
+      downloadBlob(blob, fileName);
+      setMessage("排休表预览已导出");
+    } catch (err: unknown) {
+      setMessage(`导出失败：${err instanceof Error ? err.message : "未知错误"}`);
+    } finally {
+      setExportingWeekId(null);
+    }
+  }
+
   useEffect(() => {
     async function load() {
       setLoadingWeeks(true);
@@ -708,7 +793,7 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (!message) return;
-    const t = window.setTimeout(() => setMessage(null), 2500);
+    const t = window.setTimeout(() => setMessage(null), 3000);
     return () => window.clearTimeout(t);
   }, [message]);
 
@@ -809,6 +894,31 @@ export default function AdminPage() {
       setShowDeleteConfirm(null);
       return;
     }
+    const { data: importSnapshot, error: snapshotError } = await supabase
+      .from("week_import_snapshots")
+      .select("original_file_path")
+      .eq("week_id", weekId)
+      .maybeSingle();
+    if (snapshotError) {
+      setSavingWeekId(null);
+      setMessage(snapshotError.message);
+      return;
+    }
+
+    const originalFilePath = typeof importSnapshot?.original_file_path === "string"
+      ? importSnapshot.original_file_path
+      : null;
+    if (originalFilePath) {
+      const { error: fileError } = await supabase.storage
+        .from("xls-templates")
+        .remove([originalFilePath]);
+      if (fileError) {
+        setSavingWeekId(null);
+        setMessage(`原始 XLS 删除失败：${fileError.message}`);
+        return;
+      }
+    }
+
     await supabase.from("rest_day_limits").delete().eq("week_id", weekId);
     const { error } = await supabase.from("schedule_weeks").delete().eq("id", weekId);
     setSavingWeekId(null);
@@ -897,6 +1007,82 @@ export default function AdminPage() {
           </div>
         </div>
       ) : null}
+      {exportChoiceWeek ? (
+        <div className="overlay" onClick={() => setExportChoiceWeek(null)}>
+          <div
+            className="export-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="export-choice-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header className="export-dialog-header">
+              <div>
+                <h2 id="export-choice-title">导出内容</h2>
+                <p>{exportChoiceWeek.name || formatWeekRange(exportChoiceWeek.start_date, exportChoiceWeek.end_date)}</p>
+              </div>
+              <button className="icon-button" type="button" aria-label="关闭" title="关闭" onClick={() => setExportChoiceWeek(null)}>×</button>
+            </header>
+            <div className="export-dialog-body">
+              <button
+                className="export-choice-button"
+                type="button"
+                onClick={() => {
+                  const week = exportChoiceWeek;
+                  setExportChoiceWeek(null);
+                  void handleRestPreviewExport(week);
+                }}
+              >
+                <span className="export-choice-icon" aria-hidden="true">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="8" y1="13" x2="16" y2="13" />
+                    <line x1="8" y1="17" x2="16" y2="17" />
+                  </svg>
+                </span>
+                <span className="export-choice-copy">
+                  <strong>排休表预览</strong>
+                  <span>下载排休、时段及未完成项目汇总</span>
+                </span>
+                <span className="export-choice-arrow" aria-hidden="true">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="9 18 15 12 9 6" />
+                  </svg>
+                </span>
+              </button>
+              <button
+                className="export-choice-button"
+                type="button"
+                onClick={() => {
+                  const week = exportChoiceWeek;
+                  setExportChoiceWeek(null);
+                  void handleXlsExport(week);
+                }}
+              >
+                <span className="export-choice-icon" aria-hidden="true">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2" />
+                    <line x1="3" y1="9" x2="21" y2="9" />
+                    <line x1="3" y1="15" x2="21" y2="15" />
+                    <line x1="9" y1="3" x2="9" y2="21" />
+                    <line x1="15" y1="3" x2="15" y2="21" />
+                  </svg>
+                </span>
+                <span className="export-choice-copy">
+                  <strong>骑手时段意愿</strong>
+                  <span>下载原有骑手时段意愿 XLS</span>
+                </span>
+                <span className="export-choice-arrow" aria-hidden="true">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="9 18 15 12 9 6" />
+                  </svg>
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <header className="page-header">
         <h1>后台管理</h1>
         <p>排班周管理 · 排班总览</p>
@@ -913,14 +1099,13 @@ export default function AdminPage() {
           <button className="btn-primary btn-sm" type="button" onClick={() => setShowCreateModal(true)}>+ 新增一周</button>
         </div>
         {loadingWeeks ? (
-          <div className="empty-state">加载中...</div>
+          <div className="loading-spinner"><div className="spinner" /><span>加载中...</span></div>
         ) : (
           <div className="config-grid">
             {weeks.map((week) => (
               <div
                 className={`config-card week-config-card ${activeWeek?.id === week.id ? "active-card" : ""}`}
                 key={week.id}
-                style={{ position: "relative", cursor: "pointer" }}
                 onClick={(e) => {
                   if (!(e.target as HTMLElement).closest("button") && !(e.target as HTMLElement).closest("input")) {
                     if (activeWeek?.id !== week.id) {
@@ -933,32 +1118,30 @@ export default function AdminPage() {
                 }}
               >
                 <button
-                  className="btn-ghost btn-danger"
+                  className="btn-ghost btn-danger card-delete-btn"
                   type="button"
-                  style={{ position: "absolute", top: "12px", right: "12px", padding: "4px 8px", fontSize: "12px" }}
                   disabled={savingWeekId === week.id}
                   onClick={(e) => { e.stopPropagation(); setShowDeleteConfirm(week.id); }}
                 >
                   删除
                 </button>
                 <div className="input-group" style={{ paddingRight: "32px" }}>
-                  <strong style={{ fontSize: "16px" }}>{week.name || formatWeekRange(week.start_date, week.end_date)}</strong>
-                  <span style={{ fontSize: "13px", color: "var(--text-muted)" }}>
+                  <strong className="card-title">{week.name || formatWeekRange(week.start_date, week.end_date)}</strong>
+                  <span className="card-subtitle">
                     {week.start_date} ~ {week.end_date}
                   </span>
                   <span className="week-meta-line">
                     {teamCountsByWeek[week.id] ?? 1} 个小队
                   </span>
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "8px" }}>
-                  <span style={{ fontSize: "12px", color: "var(--text-muted)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <div className="card-link-row">
+                  <span className="card-link">
                     {typeof window !== "undefined" ? `${window.location.origin}/week/${week.id}` : `/week/${week.id}`}
                   </span>
                   <button
-                    className="btn-ghost"
+                    className="btn-ghost card-copy-btn"
                     type="button"
                     onClick={(e) => { e.stopPropagation(); void navigator.clipboard.writeText(`${window.location.origin}/week/${week.id}`); setMessage("链接已复制"); }}
-                    style={{ padding: "4px 8px", border: "1px solid var(--border-color)", fontSize: "12px", color: "var(--text-muted)" }}
                     title="复制"
                   >
                     复制
@@ -974,12 +1157,26 @@ export default function AdminPage() {
                   </button>
                   {importedWeekIds.has(week.id) ? (
                     <button
-                      className="btn-ghost btn-sm"
+                      className="btn-ghost btn-sm btn-export"
                       type="button"
                       disabled={exportingWeekId === week.id}
-                      onClick={(e) => { e.stopPropagation(); void handleXlsExport(week); }}
+                      onClick={(e) => { e.stopPropagation(); setExportChoiceWeek(week); }}
                     >
-                      {exportingWeekId === week.id ? "导出中..." : "导出 XLS"}
+                      {exportingWeekId === week.id ? (
+                        <>
+                          <span className="mini-spinner" aria-hidden="true" />
+                          导出中...
+                        </>
+                      ) : (
+                        <>
+                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                            <polyline points="7 10 12 15 17 10" />
+                            <line x1="12" y1="15" x2="12" y2="3" />
+                          </svg>
+                          导出
+                        </>
+                      )}
                     </button>
                   ) : (
                     <button
@@ -1236,10 +1433,10 @@ export default function AdminPage() {
                       const rc = restCounts[day.key] ?? { used: 0, limit: 0 };
                       const full = rc.used >= rc.limit;
                       return (
-                        <th key={day.key}>
-                          {day.weekdayLabel}<br />
-                          <span style={{ fontWeight: "normal", fontSize: "12px" }}>{day.shortDate}</span><br />
-                          <span style={{ fontWeight: "normal", fontSize: "11px", color: full ? "#ef4444" : "var(--text-muted)" }}>
+                        <th key={day.key} className="day-header">
+                          <span className="day-header-label">{day.weekdayLabel}</span>
+                          <span className="day-header-date">{day.shortDate}</span>
+                          <span className={`day-header-rest ${full ? "full" : ""}`}>
                             休息日：{rc.used}/{rc.limit}
                           </span>
                         </th>
@@ -1267,17 +1464,21 @@ export default function AdminPage() {
                               {teams.find((team) => team.id === riderMap[item.riderId]?.team_id)?.name ?? "默认小队"}
                             </span>
                             {status ? (
-                              <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>
-                                {status.preferenceMode === "random"
-                                  ? status.hasRest ? "随机排休 · 已安排" : "随机排休 · 待安排"
-                                  : status.preferenceMode === "specified"
-                                    ? "指定排休"
-                                    : "尚未选择"}
-                                {" · "}
-                                {status.hasRest ? "已有排休" : "缺排休"}
-                                {" · "}
-                                {status.totalSelected}/{status.totalEntries * (activeWeek?.required_slots ?? 0)} 时段
-                              </span>
+                              <div className="rider-status">
+                                <span className={`rider-status-badge mode-${status.preferenceMode === "random" ? "random" : status.preferenceMode === "specified" ? "specified" : "none"}`}>
+                                  {status.preferenceMode === "random"
+                                    ? status.hasRest ? "随机·已安排" : "随机·待安排"
+                                    : status.preferenceMode === "specified"
+                                      ? "指定排休"
+                                      : "尚未选择"}
+                                </span>
+                                <span className={`rider-status-badge ${status.hasRest ? "has-rest" : "no-rest"}`}>
+                                  {status.hasRest ? "已有排休" : "缺排休"}
+                                </span>
+                                <span className="rider-slots">
+                                  {status.totalSelected}/{status.totalEntries * (activeWeek?.required_slots ?? 0)} 时段
+                                </span>
+                              </div>
                             ) : null}
                           </div>
                         </td>

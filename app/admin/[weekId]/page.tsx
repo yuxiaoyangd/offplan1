@@ -87,7 +87,7 @@ export default function WeekEditPage() {
 
   useEffect(() => {
     if (!message) return;
-    const t = window.setTimeout(() => setMessage(null), 2500);
+    const t = window.setTimeout(() => setMessage(null), 3000);
     return () => window.clearTimeout(t);
   }, [message]);
 

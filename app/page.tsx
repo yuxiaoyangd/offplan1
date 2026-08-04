@@ -38,7 +38,7 @@ export default function HomePage() {
       </header>
 
       {loading ? (
-        <div className="empty-state">数据加载中...</div>
+        <div className="loading-spinner"><div className="spinner" /><span>数据加载中...</span></div>
       ) : weeks.length === 0 ? (
         <div className="empty-state">暂无开放的排休周，请联系管理员。</div>
       ) : (
@@ -46,12 +46,12 @@ export default function HomePage() {
           {weeks.map((week) => (
             <div className="config-card" key={week.id}>
               <div className="input-group">
-                <strong style={{ fontSize: "16px" }}>{formatWeekRange(week.start_date, week.end_date)}</strong>
-                <span style={{ fontSize: "13px", color: "var(--text-muted)" }}>
+                <strong className="card-title">{formatWeekRange(week.start_date, week.end_date)}</strong>
+                <span className="card-subtitle">
                   {week.start_date} ~ {week.end_date}
                 </span>
               </div>
-              <div className="card-actions-row" style={{ marginTop: "12px" }}>
+              <div className="card-actions-row">
                 <button
                   className="btn-primary btn-sm"
                   type="button"
