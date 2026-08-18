@@ -365,6 +365,7 @@ export default function WeekSchedulePage() {
       || draftMode === "specified"
     ),
   );
+  const noRestQuota = Object.keys(limits).length > 0 && Object.values(limits).every((v) => v === 0);
 
   return (
     <main className={`page-container employee-page ${hasFixedSubmit ? "with-fixed-submit" : ""}`}>
@@ -487,11 +488,13 @@ export default function WeekSchedulePage() {
           <h2>是否随机排休？</h2>
           <p>选择随机排休，随机安排一天休息</p>
           <button className="random-choice-primary" type="button" onClick={() => setDraftMode("random")}>
-            随机排休
+            选择出勤时段
           </button>
-          <button className="random-choice-secondary" type="button" onClick={() => setDraftMode("specified")}>
-            不随机，我要指定排休
-          </button>
+          {!noRestQuota ? (
+            <button className="random-choice-secondary" type="button" onClick={() => setDraftMode("specified")}>
+              不随机，我要指定排休
+            </button>
+          ) : null}
         </section>
       ) : null}
 

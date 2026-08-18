@@ -1460,6 +1460,7 @@ export default function AdminPage() {
                         <td style={{ textAlign: "left" }}>
                           <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                             <span style={{ fontWeight: 600 }}>{item.riderName}</span>
+                            <span className="rider-team-label">{item.riderId}</span>
                             <span className="rider-team-label">
                               {teams.find((team) => team.id === riderMap[item.riderId]?.team_id)?.name ?? "默认小队"}
                             </span>
