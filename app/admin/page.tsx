@@ -630,74 +630,127 @@ export default function AdminPage() {
     setExportingWeekId(week.id);
     setMessage(null);
     try {
-      const [ridersRes, schedulesRes, slotsRes] = await Promise.all([
-        supabase.from("riders").select("rider_id,name").eq("week_id", week.id),
+      const [ridersRes, schedulesRes, slotsRes, teamsRes] = await Promise.all([
+        supabase.from("riders").select("rider_id,name,team_id").eq("week_id", week.id),
         supabase.from("rider_schedules").select("rider_id,work_date,slot_id,is_selected").eq("week_id", week.id),
         supabase.from("time_slots").select("id,name,sort_order").eq("week_id", week.id).order("sort_order"),
+        supabase.from("schedule_teams").select("id,name").eq("week_id", week.id).order("name"),
       ]);
-      const requestError = ridersRes.error ?? schedulesRes.error ?? slotsRes.error;
+      const requestError = ridersRes.error ?? schedulesRes.error ?? slotsRes.error ?? teamsRes.error;
       if (requestError) throw requestError;
 
-      const riders = (ridersRes.data ?? []) as Pick<RiderRow, "rider_id" | "name">[];
+      const riders = (ridersRes.data ?? []) as Pick<RiderRow, "rider_id" | "name" | "team_id">[];
       const weekSchedules = (schedulesRes.data ?? []) as Pick<
         RiderScheduleRow,
         "rider_id" | "work_date" | "slot_id" | "is_selected"
       >[];
       const weekSlots = (slotsRes.data ?? []) as Pick<TimeSlotRow, "id" | "name" | "sort_order">[];
-      const riderNameMap = new Map(riders.map((rider) => [rider.rider_id, rider.name]));
+      const weekTeams = (teamsRes.data ?? []) as Pick<ScheduleTeamRow, "id" | "name">[];
+      const riderMap = new Map(riders.map((rider) => [rider.rider_id, rider]));
+      const nameCounts = riders.reduce<Map<string, number>>((counts, rider) => {
+        counts.set(rider.name, (counts.get(rider.name) ?? 0) + 1);
+        return counts;
+      }, new Map());
+      const riderLabel = (rider: Pick<RiderRow, "rider_id" | "name">) =>
+        (nameCounts.get(rider.name) ?? 0) > 1 ? `${rider.name}（${rider.rider_id}）` : rider.name;
       const days = buildDaysFromRange(week.start_date, week.end_date);
-      const byDay = new Map<string, Set<string>>();
-      const bySlot = new Map<string, Set<string>>();
+      const byTeamAndDay = new Map<string, Set<string>>();
+      const selectedSlotIdsByRider = new Map<string, Set<string>>();
       const scheduledRiderIds = new Set<string>();
       const restedRiderIds = new Set<string>();
 
       for (const schedule of weekSchedules) {
-        const riderName = riderNameMap.get(schedule.rider_id);
-        if (!riderName) continue;
+        const rider = riderMap.get(schedule.rider_id);
+        if (!rider) continue;
         if (schedule.slot_id === null) {
           restedRiderIds.add(schedule.rider_id);
-          const names = byDay.get(schedule.work_date) ?? new Set<string>();
-          names.add(riderName);
-          byDay.set(schedule.work_date, names);
+          const key = `${rider.team_id}:${schedule.work_date}`;
+          const riderIds = byTeamAndDay.get(key) ?? new Set<string>();
+          riderIds.add(schedule.rider_id);
+          byTeamAndDay.set(key, riderIds);
         } else if (schedule.is_selected) {
           scheduledRiderIds.add(schedule.rider_id);
-          const names = bySlot.get(schedule.slot_id) ?? new Set<string>();
-          names.add(riderName);
-          bySlot.set(schedule.slot_id, names);
+          const slotIds = selectedSlotIdsByRider.get(schedule.rider_id) ?? new Set<string>();
+          slotIds.add(schedule.slot_id);
+          selectedSlotIdsByRider.set(schedule.rider_id, slotIds);
         }
       }
 
-      const sortedNames = (names: Set<string>) => Array.from(names).sort((a, b) => a.localeCompare(b, "zh-CN"));
-      const namesText = (names: Set<string>) => {
-        const values = sortedNames(names);
+      const sortedLabels = (riderIds: Iterable<string>) => Array.from(riderIds)
+        .map((riderId) => riderMap.get(riderId))
+        .filter((rider): rider is Pick<RiderRow, "rider_id" | "name" | "team_id"> => Boolean(rider))
+        .map(riderLabel)
+        .sort((a, b) => a.localeCompare(b, "zh-CN"));
+      const ridersText = (riderIds: Iterable<string>) => {
+        const values = sortedLabels(riderIds);
         return values.length > 0 ? values.join("、") : "无";
       };
+      const teamIdsWithRiders = new Set(riders.map((rider) => rider.team_id));
+      const knownTeamIds = new Set(weekTeams.map((team) => team.id));
+      const teamSections: Pick<ScheduleTeamRow, "id" | "name">[] = [
+        ...weekTeams.filter((team) => teamIdsWithRiders.has(team.id)),
+        ...Array.from(teamIdsWithRiders)
+          .filter((teamId) => !knownTeamIds.has(teamId))
+          .map((teamId) => ({ id: teamId, name: "未命名小队" })),
+      ];
       const lines = [
         "排休表预览",
         `排班周：${week.name || formatWeekRange(week.start_date, week.end_date)}`,
         `${week.start_date} ~ ${week.end_date}`,
-        "",
-        "按日期排休",
-        ...days.map((day) => {
-          const names = byDay.get(day.key) ?? new Set<string>();
-          return `${day.weekdayLabel}（${names.size}人）：${namesText(names)}`;
+        ...teamSections.flatMap((team) => {
+          const teamRiders = riders.filter((rider) => rider.team_id === team.id);
+          const slotGroups = new Map<string, { slotIds: string[]; riderIds: Set<string> }>();
+          for (const rider of teamRiders) {
+            const selectedSlotIds = selectedSlotIdsByRider.get(rider.rider_id);
+            if (!selectedSlotIds?.size) continue;
+            const slotIds = weekSlots.filter((slot) => selectedSlotIds.has(slot.id)).map((slot) => slot.id);
+            const key = slotIds.join("|");
+            const group = slotGroups.get(key) ?? { slotIds, riderIds: new Set<string>() };
+            group.riderIds.add(rider.rider_id);
+            slotGroups.set(key, group);
+          }
+          const sortedSlotGroups = Array.from(slotGroups.values()).sort((a, b) => {
+            const commonLength = Math.min(a.slotIds.length, b.slotIds.length);
+            for (let index = 0; index < commonLength; index += 1) {
+              const aOrder = weekSlots.findIndex((slot) => slot.id === a.slotIds[index]);
+              const bOrder = weekSlots.findIndex((slot) => slot.id === b.slotIds[index]);
+              if (aOrder !== bOrder) return aOrder - bOrder;
+            }
+            return a.slotIds.length - b.slotIds.length;
+          });
+          const unscheduledRiderIds = teamRiders
+            .filter((rider) => !scheduledRiderIds.has(rider.rider_id) && !restedRiderIds.has(rider.rider_id))
+            .map((rider) => rider.rider_id);
+          const unrestedRiderIds = teamRiders
+            .filter((rider) => !restedRiderIds.has(rider.rider_id))
+            .map((rider) => rider.rider_id);
+          return [
+            "",
+            `【小队：${team.name}】`,
+            `骑手人数：${teamRiders.length}人`,
+            "",
+            "休息日",
+            ...days.map((day) => {
+              const riderIds = byTeamAndDay.get(`${team.id}:${day.key}`) ?? new Set<string>();
+              return `${day.weekdayLabel}（${riderIds.size}人）：${ridersText(riderIds)}`;
+            }),
+            "",
+            "出勤时段",
+            ...(sortedSlotGroups.length > 0
+              ? sortedSlotGroups.map((group) => {
+                const slotNames = group.slotIds
+                  .map((slotId) => weekSlots.find((slot) => slot.id === slotId)?.name)
+                  .filter(Boolean)
+                  .join("、");
+                return `${slotNames}（${group.riderIds.size}人）：${ridersText(group.riderIds)}`;
+              })
+              : ["无（0人）：无"]),
+            "",
+            "未完成项目",
+            `暂未排班（${unscheduledRiderIds.length}人）：${ridersText(unscheduledRiderIds)}`,
+            `暂未排休（${unrestedRiderIds.length}人）：${ridersText(unrestedRiderIds)}`,
+          ];
         }),
-        "",
-        "按时段排班",
-        ...weekSlots.map((slot) => {
-          const names = bySlot.get(slot.id) ?? new Set<string>();
-          return `${slot.name}（${names.size}人）：${namesText(names)}`;
-        }),
-        "",
-        "未完成项目",
-        (() => {
-          const names = riders.filter((rider) => !scheduledRiderIds.has(rider.rider_id) && !restedRiderIds.has(rider.rider_id));
-          return `暂未排班（${names.length}人）：${names.length ? names.map((rider) => rider.name).sort((a, b) => a.localeCompare(b, "zh-CN")).join("、") : "无"}`;
-        })(),
-        (() => {
-          const names = riders.filter((rider) => !restedRiderIds.has(rider.rider_id));
-          return `暂未排休（${names.length}人）：${names.length ? names.map((rider) => rider.name).sort((a, b) => a.localeCompare(b, "zh-CN")).join("、") : "无"}`;
-        })(),
       ];
       const blob = new Blob([`\uFEFF${lines.join("\r\n")}`], { type: "text/plain;charset=utf-8" });
       const fileName = `${week.name || formatWeekRange(week.start_date, week.end_date)}-排休表预览.txt`;

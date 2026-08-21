@@ -233,23 +233,49 @@ export default function WeekSchedulePage() {
   async function saveEmployeeName() {
     const trimmed = draftName.trim();
     if (!trimmed) {
-      setMessage("请填写姓名");
+      setMessage("请填写姓名或骑手 ID");
       return;
     }
     setSubmittingKey("name");
-    const { data, error } = await supabase
+
+    const idResult = await supabase
       .from("riders")
       .select("*")
       .eq("week_id", weekId)
-      .ilike("name", trimmed)
+      .eq("rider_id", trimmed)
       .maybeSingle();
+
+    let currentRider = idResult.data as RiderRow | null;
+    if (!idResult.error && !currentRider) {
+      const nameResult = await supabase
+        .from("riders")
+        .select("*")
+        .eq("week_id", weekId)
+        .ilike("name", trimmed)
+        .limit(2);
+
+      if (nameResult.error) {
+        setSubmittingKey(null);
+        setMessage("校验失败，请稍后重试");
+        return;
+      }
+      if ((nameResult.data?.length ?? 0) > 1) {
+        setSubmittingKey(null);
+        setMessage(`当前排班周存在多位“${trimmed}”，请输入骑手 ID`);
+        return;
+      }
+      currentRider = (nameResult.data?.[0] as RiderRow | undefined) ?? null;
+    }
     setSubmittingKey(null);
 
-    if (error || !data) {
-      setMessage(`“${trimmed}”不在当前排班周的骑手名单中，请联系管理员`);
+    if (idResult.error) {
+      setMessage("校验失败，请稍后重试");
       return;
     }
-    const currentRider = data as RiderRow;
+    if (!currentRider) {
+      setMessage(`“${trimmed}”不是当前排班周的骑手姓名或骑手 ID，请联系管理员`);
+      return;
+    }
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
       rider_id: currentRider.rider_id,
       name: currentRider.name,
@@ -417,19 +443,18 @@ export default function WeekSchedulePage() {
       {showNameGate ? (
         <div className="welcome-overlay">
           <section className="welcome-card">
-            <h2>填写姓名</h2>
-            <p>请输入骑手名单中的姓名。</p>
+            <h2>填写姓名或骑手 ID</h2>
+            <p>请输入骑手名单中的姓名；如有同名，请输入骑手 ID。</p>
             <div className="input-group">
               <input
                 className="clean-input"
                 value={draftName}
                 onChange={(event) => setDraftName(event.target.value)}
                 onKeyDown={(event) => { if (event.key === "Enter") void saveEmployeeName(); }}
-                placeholder="姓名"
-                maxLength={20}
+                placeholder="姓名或骑手 ID"
               />
               <button className="btn-primary" type="button" onClick={saveEmployeeName} disabled={submittingKey === "name"}>
-                {submittingKey === "name" ? "校验中..." : "确认姓名"}
+                {submittingKey === "name" ? "校验中..." : "确认身份"}
               </button>
             </div>
           </section>
@@ -488,7 +513,7 @@ export default function WeekSchedulePage() {
           <h2>是否随机排休？</h2>
           <p>选择随机排休，随机安排一天休息</p>
           <button className="random-choice-primary" type="button" onClick={() => setDraftMode("random")}>
-            选择出勤时段
+            随机排休
           </button>
           {!noRestQuota ? (
             <button className="random-choice-secondary" type="button" onClick={() => setDraftMode("specified")}>
