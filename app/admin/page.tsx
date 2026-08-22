@@ -18,6 +18,7 @@ import type {
 const DEFAULT_WEEKDAY_LIMIT = 5;
 const DEFAULT_WEEKEND_LIMIT = 2;
 const XLS_MIME_TYPE = "application/vnd.ms-excel";
+const SCHEDULE_PAGE_SIZE = 1000;
 
 type BulkActionType = "apply-default" | "apply-slot" | "set-rest" | "clear-rest" | "clear-schedules";
 type QuickFilterKey = "random" | "unselected" | "noRest" | "incomplete" | "untouched";
@@ -88,6 +89,27 @@ function blobToBase64(blob: Blob): Promise<string> {
     };
     reader.readAsDataURL(blob);
   });
+}
+
+async function fetchAllWeekSchedules(weekId: string): Promise<RiderScheduleRow[]> {
+  const schedules: RiderScheduleRow[] = [];
+
+  for (let from = 0; ; from += SCHEDULE_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from("rider_schedules")
+      .select("*")
+      .eq("week_id", weekId)
+      .order("id", { ascending: true })
+      .range(from, from + SCHEDULE_PAGE_SIZE - 1);
+
+    if (error) throw error;
+
+    const page = (data ?? []) as RiderScheduleRow[];
+    schedules.push(...page);
+    if (page.length < SCHEDULE_PAGE_SIZE) break;
+  }
+
+  return schedules;
 }
 
 export default function AdminPage() {
@@ -522,11 +544,13 @@ export default function AdminPage() {
       return;
     }
 
-    const { data: latestSchedules } = await supabase
-      .from("rider_schedules")
-      .select("*")
-      .eq("week_id", activeWeek.id);
-    if (latestSchedules) setSchedules(latestSchedules);
+    try {
+      const latestSchedules = await fetchAllWeekSchedules(activeWeek.id);
+      if (activeWeekIdRef.current === activeWeek.id) setSchedules(latestSchedules);
+    } catch (err: unknown) {
+      setMessage(`排班已补全，但总览刷新失败：${err instanceof Error ? err.message : "未知错误"}`);
+      return;
+    }
 
     const unassigned = Number(data?.restUnassigned ?? 0);
     const summary = `已安排排休 ${Number(data?.restAssigned ?? 0)} 人，补充 ${Number(data?.slotsAdded ?? 0)} 个时段`;
@@ -630,20 +654,16 @@ export default function AdminPage() {
     setExportingWeekId(week.id);
     setMessage(null);
     try {
-      const [ridersRes, schedulesRes, slotsRes, teamsRes] = await Promise.all([
+      const [ridersRes, weekSchedules, slotsRes, teamsRes] = await Promise.all([
         supabase.from("riders").select("rider_id,name,team_id").eq("week_id", week.id),
-        supabase.from("rider_schedules").select("rider_id,work_date,slot_id,is_selected").eq("week_id", week.id),
+        fetchAllWeekSchedules(week.id),
         supabase.from("time_slots").select("id,name,sort_order").eq("week_id", week.id).order("sort_order"),
         supabase.from("schedule_teams").select("id,name").eq("week_id", week.id).order("name"),
       ]);
-      const requestError = ridersRes.error ?? schedulesRes.error ?? slotsRes.error ?? teamsRes.error;
+      const requestError = ridersRes.error ?? slotsRes.error ?? teamsRes.error;
       if (requestError) throw requestError;
 
       const riders = (ridersRes.data ?? []) as Pick<RiderRow, "rider_id" | "name" | "team_id">[];
-      const weekSchedules = (schedulesRes.data ?? []) as Pick<
-        RiderScheduleRow,
-        "rider_id" | "work_date" | "slot_id" | "is_selected"
-      >[];
       const weekSlots = (slotsRes.data ?? []) as Pick<TimeSlotRow, "id" | "name" | "sort_order">[];
       const weekTeams = (teamsRes.data ?? []) as Pick<ScheduleTeamRow, "id" | "name">[];
       const riderMap = new Map(riders.map((rider) => [rider.rider_id, rider]));
@@ -817,28 +837,34 @@ export default function AdminPage() {
     setOverviewLoading(true);
     const curWeek = activeWeek;
     async function loadWeek() {
-      const [slotsRes, schedulesRes, limitsRes, ridersRes, teamsRes] = await Promise.all([
-        supabase.from("time_slots").select("*").eq("week_id", curWeek.id).order("sort_order"),
-        supabase.from("rider_schedules").select("*").eq("week_id", curWeek.id),
-        supabase.from("rest_day_limits").select("team_id,rest_date,max_slots").eq("week_id", curWeek.id),
-        supabase.from("riders").select("*").eq("week_id", curWeek.id),
-        supabase.from("schedule_teams").select("*").eq("week_id", curWeek.id).order("name"),
-      ]);
-      if (cancelled || requestId !== overviewRequestRef.current || activeWeekIdRef.current !== curWeek.id) return;
+      try {
+        const [slotsRes, weekSchedules, limitsRes, ridersRes, teamsRes] = await Promise.all([
+          supabase.from("time_slots").select("*").eq("week_id", curWeek.id).order("sort_order"),
+          fetchAllWeekSchedules(curWeek.id),
+          supabase.from("rest_day_limits").select("team_id,rest_date,max_slots").eq("week_id", curWeek.id),
+          supabase.from("riders").select("*").eq("week_id", curWeek.id),
+          supabase.from("schedule_teams").select("*").eq("week_id", curWeek.id).order("name"),
+        ]);
+        if (cancelled || requestId !== overviewRequestRef.current || activeWeekIdRef.current !== curWeek.id) return;
 
-      setSlots(slotsRes.data ?? []);
-      setSchedules(schedulesRes.data ?? []);
-      setLimits((limitsRes.data ?? []).reduce<Record<string, number>>((acc, row) => {
-          acc[`${row.team_id}:${row.rest_date}`] = row.max_slots;
-          return acc;
-        }, {}));
-      setRiderMap((ridersRes.data ?? []).reduce<Record<string, RiderRow>>((acc, r) => { acc[r.rider_id] = r; return acc; }, {}));
-      setTeams(teamsRes.data ?? []);
-      setLoadedOverviewWeekId(curWeek.id);
-      setOverviewLoading(false);
+        const loadError = slotsRes.error ?? limitsRes.error ?? ridersRes.error ?? teamsRes.error;
+        if (loadError) throw loadError;
 
-      const loadError = slotsRes.error ?? schedulesRes.error ?? limitsRes.error ?? ridersRes.error ?? teamsRes.error;
-      if (loadError) setMessage(`排班总览加载失败：${loadError.message}`);
+        setSlots(slotsRes.data ?? []);
+        setSchedules(weekSchedules);
+        setLimits((limitsRes.data ?? []).reduce<Record<string, number>>((acc, row) => {
+            acc[`${row.team_id}:${row.rest_date}`] = row.max_slots;
+            return acc;
+          }, {}));
+        setRiderMap((ridersRes.data ?? []).reduce<Record<string, RiderRow>>((acc, r) => { acc[r.rider_id] = r; return acc; }, {}));
+        setTeams(teamsRes.data ?? []);
+        setLoadedOverviewWeekId(curWeek.id);
+        setOverviewLoading(false);
+      } catch (err: unknown) {
+        if (cancelled || requestId !== overviewRequestRef.current || activeWeekIdRef.current !== curWeek.id) return;
+        setOverviewLoading(false);
+        setMessage(`排班总览加载失败：${err instanceof Error ? err.message : "未知错误"}`);
+      }
     }
     void loadWeek();
     return () => { cancelled = true; };
@@ -851,6 +877,24 @@ export default function AdminPage() {
   }, [message]);
 
   useEffect(() => {
+    let scheduleRefreshTimer: number | null = null;
+
+    function refreshWeekSchedules() {
+      if (!activeWeek) return;
+      if (scheduleRefreshTimer !== null) window.clearTimeout(scheduleRefreshTimer);
+
+      scheduleRefreshTimer = window.setTimeout(async () => {
+        try {
+          const data = await fetchAllWeekSchedules(activeWeek.id);
+          if (activeWeekIdRef.current === activeWeek.id) setSchedules(data);
+        } catch (err: unknown) {
+          if (activeWeekIdRef.current === activeWeek.id) {
+            setMessage(`排班总览刷新失败：${err instanceof Error ? err.message : "未知错误"}`);
+          }
+        }
+      }, 300);
+    }
+
     const channel = supabase
       .channel(`admin-sync-${activeWeek?.id ?? "none"}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "schedule_weeks" }, async () => {
@@ -865,11 +909,7 @@ export default function AdminPage() {
         const { data } = await supabase.from("time_slots").select("*").eq("week_id", activeWeek.id).order("sort_order");
         if (data && activeWeekIdRef.current === activeWeek.id) setSlots(data);
       })
-      .on("postgres_changes", { event: "*", schema: "public", table: "rider_schedules", filter: activeWeek ? `week_id=eq.${activeWeek.id}` : undefined }, async () => {
-        if (!activeWeek) return;
-        const { data } = await supabase.from("rider_schedules").select("*").eq("week_id", activeWeek.id);
-        if (data && activeWeekIdRef.current === activeWeek.id) setSchedules(data);
-      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "rider_schedules", filter: activeWeek ? `week_id=eq.${activeWeek.id}` : undefined }, refreshWeekSchedules)
       .on("postgres_changes", { event: "*", schema: "public", table: "rest_day_limits", filter: activeWeek ? `week_id=eq.${activeWeek.id}` : undefined }, async () => {
         if (!activeWeek) return;
         const { data } = await supabase.from("rest_day_limits").select("team_id,rest_date,max_slots").eq("week_id", activeWeek.id);
@@ -896,7 +936,10 @@ export default function AdminPage() {
         if (data) setImportedWeekIds(new Set(data.map((snapshot) => snapshot.week_id)));
       })
       .subscribe();
-    return () => { void supabase.removeChannel(channel); };
+    return () => {
+      if (scheduleRefreshTimer !== null) window.clearTimeout(scheduleRefreshTimer);
+      void supabase.removeChannel(channel);
+    };
   }, [activeWeek]);
 
   async function saveWeek(week: ScheduleWeekRow) {
