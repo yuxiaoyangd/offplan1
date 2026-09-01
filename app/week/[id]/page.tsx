@@ -16,6 +16,29 @@ type RpcResult = {
   message?: string;
 };
 
+function RongbaoAd() {
+  return (
+    <a
+      className="rongbao-ad"
+      href="https://rongbao.yick.cc"
+      target="_blank"
+      rel="noreferrer"
+      aria-label="了解茸宝宠物健康服务"
+    >
+      <span className="rongbao-ad-badge">推荐应用</span>
+      <div className="rongbao-ad-mark">
+        <img src="https://rongbao.yick.cc/rongbao.png" alt="茸宝" loading="lazy" />
+      </div>
+      <div className="rongbao-ad-copy">
+        <span className="rongbao-ad-label">宠物健康管理</span>
+        <strong>茸宝 · 更专业的宠物 AI 伴侣</strong>
+        <p>健康咨询 · 营养建议 · 行为分析</p>
+      </div>
+      <span className="rongbao-ad-arrow" aria-hidden="true">›</span>
+    </a>
+  );
+}
+
 function getDefaultLimit(date: string) {
   const day = new Date(`${date}T00:00:00`).getDay();
   return day === 0 || day === 6 ? DEFAULT_WEEKEND_LIMIT : DEFAULT_WEEKDAY_LIMIT;
@@ -391,10 +414,11 @@ export default function WeekSchedulePage() {
       || draftMode === "specified"
     ),
   );
+  const hasRongbaoAd = Boolean(rider && schedulesLoaded && mode);
   const noRestQuota = Object.keys(limits).length > 0 && Object.values(limits).every((v) => v === 0);
 
   return (
-    <main className={`page-container employee-page ${hasFixedSubmit ? "with-fixed-submit" : ""}`}>
+    <main className={`page-container employee-page ${hasFixedSubmit ? "with-fixed-submit" : ""} ${hasRongbaoAd ? "with-rongbao-ad" : ""}`}>
       {confirmRandom ? (
         <div className="confirm-overlay">
           <section className="confirm-card employee-confirm-card">
@@ -644,6 +668,8 @@ export default function WeekSchedulePage() {
       ) : rider && !schedulesLoaded ? (
         <div className="empty-state">加载排班数据中...</div>
       ) : null}
+
+      {rider && schedulesLoaded && mode ? <RongbaoAd /> : null}
     </main>
   );
 }

@@ -2251,6 +2251,135 @@ select:focus-visible,
   font-weight: 600;
 }
 
+.rongbao-ad {
+  position: fixed;
+  z-index: 70;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  left: 50%;
+  width: min(calc(100% - 24px), 836px);
+  transform: translateX(-50%);
+  padding: 16px 18px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  overflow: hidden;
+  background: linear-gradient(135deg, #fffaf0 0%, #fff 72%);
+  border: 1px solid #f5d9a0;
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 14px rgba(180, 120, 24, 0.08);
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.employee-page.with-rongbao-ad {
+  padding-bottom: 124px;
+}
+
+.rongbao-ad:hover {
+  border-color: #f2c978;
+  box-shadow: 0 6px 18px rgba(180, 120, 24, 0.14);
+}
+
+.rongbao-ad-badge {
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  z-index: 2;
+  padding: 3px 7px;
+  color: #a16207;
+  background: rgba(255, 251, 235, 0.88);
+  border: 1px solid rgba(245, 217, 160, 0.9);
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.rongbao-ad::after {
+  position: absolute;
+  top: -42px;
+  right: -22px;
+  width: 110px;
+  height: 110px;
+  content: "";
+  background: rgba(245, 158, 11, 0.08);
+  border-radius: 50%;
+}
+
+.rongbao-ad-mark {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  background: #fff;
+  border-radius: 13px;
+  box-shadow: 0 5px 10px rgba(217, 119, 6, 0.2);
+}
+
+.rongbao-ad-mark img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+  border-radius: inherit;
+}
+
+.rongbao-ad-copy {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  flex: 1;
+}
+
+.rongbao-ad-label {
+  display: block;
+  margin-bottom: 3px;
+  color: #b45309;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.rongbao-ad-copy strong {
+  display: block;
+  color: var(--text-main);
+  font-size: 14px;
+}
+
+.rongbao-ad-copy p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.rongbao-ad-arrow {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  color: rgba(180, 120, 24, 0.42);
+  font-size: 28px;
+  font-weight: 300;
+  line-height: 1;
+}
+
+.rongbao-ad:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 3px;
+}
+
+.rongbao-ad-arrow {
+  user-select: none;
+}
+
 .specified-workflow {
   display: grid;
   gap: 16px;
