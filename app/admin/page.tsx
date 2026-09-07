@@ -20,6 +20,10 @@ const DEFAULT_WEEKEND_LIMIT = 2;
 const XLS_MIME_TYPE = "application/vnd.ms-excel";
 const SCHEDULE_PAGE_SIZE = 1000;
 
+function getTodayKey() {
+  return formatDateKey(new Date());
+}
+
 type BulkActionType = "apply-default" | "apply-slot" | "set-rest" | "clear-rest" | "clear-schedules";
 type QuickFilterKey = "random" | "unselected" | "noRest" | "incomplete" | "untouched";
 type RiderStatus = {
@@ -792,10 +796,11 @@ export default function AdminPage() {
         supabase.from("week_import_snapshots").select("week_id"),
       ]);
       if (weeksRes.data) {
-        setWeeks(weeksRes.data);
+        const upcomingWeeks = weeksRes.data.filter((week) => week.start_date > getTodayKey());
+        setWeeks(upcomingWeeks);
         const savedWeekId = typeof window !== "undefined" ? localStorage.getItem("admin-selected-week-id") : null;
-        const savedWeek = savedWeekId ? weeksRes.data.find((w) => w.id === savedWeekId) : null;
-        setActiveWeek(savedWeek ?? weeksRes.data.find((w) => w.is_active) ?? weeksRes.data[0] ?? null);
+        const savedWeek = savedWeekId ? upcomingWeeks.find((w) => w.id === savedWeekId) : null;
+        setActiveWeek(savedWeek ?? upcomingWeeks.find((w) => w.is_active) ?? upcomingWeeks[0] ?? null);
       }
       if (teamsRes.data) {
         setTeamCountsByWeek(teamsRes.data.reduce<Record<string, number>>((counts, team) => {
@@ -900,8 +905,9 @@ export default function AdminPage() {
       .on("postgres_changes", { event: "*", schema: "public", table: "schedule_weeks" }, async () => {
         const { data } = await supabase.from("schedule_weeks").select("*").order("created_at", { ascending: false });
         if (data) {
-          setWeeks(data);
-          setActiveWeek((cur) => data.find((w) => w.id === cur?.id) ?? data.find((w) => w.is_active) ?? data[0] ?? null);
+          const upcomingWeeks = data.filter((week) => week.start_date > getTodayKey());
+          setWeeks(upcomingWeeks);
+          setActiveWeek((cur) => upcomingWeeks.find((w) => w.id === cur?.id) ?? upcomingWeeks.find((w) => w.is_active) ?? upcomingWeeks[0] ?? null);
         }
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "time_slots" }, async () => {
@@ -1061,7 +1067,9 @@ export default function AdminPage() {
       return;
     }
     if (data) {
-      setWeeks((cur) => [data, ...cur]);
+      if (data.start_date > getTodayKey()) {
+        setWeeks((cur) => [data, ...cur]);
+      }
       setShowCreateModal(false);
       setNewWeekName("");
       setNewWeekStart("");
@@ -1192,7 +1200,10 @@ export default function AdminPage() {
             <h2>排班周配置</h2>
             <p>点击卡片切换排班总览</p>
           </div>
-          <button className="btn-primary btn-sm" type="button" onClick={() => setShowCreateModal(true)}>+ 新增一周</button>
+          <div className="section-header-actions">
+            <button className="history-entry" type="button" onClick={() => router.push("/admin/history")}>历史排班</button>
+            <button className="btn-primary btn-sm" type="button" onClick={() => setShowCreateModal(true)}>+ 新增一周</button>
+          </div>
         </div>
         {loadingWeeks ? (
           <div className="loading-spinner"><div className="spinner" /><span>加载中...</span></div>

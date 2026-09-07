@@ -2251,6 +2251,60 @@ select:focus-visible,
   font-weight: 600;
 }
 
+.section-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.history-entry,
+.back-link {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text-muted, #8b95a7);
+  cursor: pointer;
+  font: inherit;
+  white-space: nowrap;
+}
+
+.history-entry:hover,
+.back-link:hover { color: var(--text-primary, #334155); }
+
+.history-list { display: grid; gap: 12px; }
+.history-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 20px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 14px;
+  background: var(--card-bg, #fff);
+}
+.history-card-main { display: grid; gap: 6px; }
+.history-card-main > strong { font-size: 16px; }
+.history-card-main > span { color: var(--text-muted, #8b95a7); font-size: 13px; }
+.history-meta, .history-summary { display: flex; flex-wrap: wrap; gap: 14px; color: var(--text-muted, #8b95a7); font-size: 13px; }
+.history-card-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.history-card-actions button { white-space: nowrap; }
+.history-confirm-card { max-width: 440px; }
+.empty-state { display: grid; gap: 8px; justify-items: center; padding: 56px 20px; color: var(--text-muted, #8b95a7); }
+.empty-state strong { color: var(--text-primary, #334155); }
+.history-table-wrap { overflow-x: auto; margin-top: 18px; }
+.history-table { width: 100%; min-width: 760px; border-collapse: collapse; font-size: 13px; }
+.history-table th, .history-table td { padding: 11px 12px; border-bottom: 1px solid var(--border-color, #e5e7eb); text-align: left; white-space: nowrap; }
+.history-table th { color: var(--text-muted, #8b95a7); font-weight: 600; background: rgba(148, 163, 184, .08); }
+.history-table td:first-child { display: grid; gap: 3px; }
+.history-table td:first-child small { color: var(--text-muted, #8b95a7); }
+.history-summary { padding-bottom: 4px; }
+@media (max-width: 640px) {
+  .history-card { align-items: flex-start; flex-direction: column; }
+  .history-card-actions { width: 100%; }
+  .history-card-actions button { flex: 1; }
+  .section-header-actions { gap: 10px; }
+}
+
 .rongbao-ad {
   position: fixed;
   z-index: 70;
