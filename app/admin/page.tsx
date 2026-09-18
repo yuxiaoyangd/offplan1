@@ -1368,14 +1368,29 @@ export default function AdminPage() {
                   </div>
                 </div>
                 {slotSelectionRates.length > 0 ? (
-                  <div className="overview-slot-rates">
+                  <div
+                    className="overview-slot-rates"
+                    aria-label="查看已选时段占比明细"
+                  >
                     <span className="overview-slot-rates-title">已选时段占比</span>
                     <div className="overview-slot-rates-list">
-                      {slotSelectionRates.map((slot) => (
+                      {slotSelectionRates.slice(0, 3).map((slot) => (
                         <span className="overview-slot-rate" key={slot.id}>
                           <strong>{slot.name}</strong> {slot.rate}%
                         </span>
                       ))}
+                    </div>
+                    <div className="overview-slot-rates-popover" role="tooltip">
+                      <strong className="overview-slot-rates-popover-title">已选时段明细</strong>
+                      <div className="overview-slot-rates-popover-list">
+                        {slotSelectionRates.map((slot) => (
+                          <div className="overview-slot-rates-popover-row" key={slot.id}>
+                            <span>{slot.name}</span>
+                            <span>{slot.selectedCount}/{weekRiders.length}</span>
+                            <strong>{slot.rate}%</strong>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 ) : null}

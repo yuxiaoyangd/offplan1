@@ -754,10 +754,12 @@ select:focus-visible,
 }
 
 .overview-slot-rates {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 2px 0;
+  cursor: help;
 }
 
 .overview-slot-rates-title {
@@ -782,6 +784,62 @@ select:focus-visible,
   margin-right: 5px;
   color: var(--text-muted);
   font-weight: 500;
+}
+
+.overview-slot-rates-popover {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  right: 0;
+  width: max-content;
+  min-width: 280px;
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--card-bg);
+  box-shadow: var(--shadow-md);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition: opacity 150ms ease, transform 150ms ease, visibility 150ms ease;
+  pointer-events: none;
+}
+
+.overview-slot-rates:hover .overview-slot-rates-popover {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.overview-slot-rates-popover-title {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--text-main);
+  font-size: 13px;
+}
+
+.overview-slot-rates-popover-list {
+  display: grid;
+  gap: 7px;
+}
+
+.overview-slot-rates-popover-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.overview-slot-rates-popover-row > span:first-child {
+  color: var(--text-main);
+}
+
+.overview-slot-rates-popover-row strong {
+  color: var(--text-main);
+  font-weight: 600;
 }
 
 .overview-header-loading {
