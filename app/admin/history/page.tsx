@@ -53,7 +53,7 @@ export default function HistoryPage() {
     const { data, error } = await supabase
       .from("schedule_weeks")
       .select("*")
-      .lte("start_date", todayKey())
+      .lt("start_date", todayKey())
       .order("start_date", { ascending: false });
 
     if (error) {
@@ -108,7 +108,7 @@ export default function HistoryPage() {
       setMessage(`原始 XLS 删除失败：${fileError.message}`);
       return;
     }
-    const { error } = await supabase.from("schedule_weeks").delete().lte("start_date", todayKey());
+    const { error } = await supabase.from("schedule_weeks").delete().lt("start_date", todayKey());
     setWorking(false);
     if (error) { setMessage(error.message); return; }
     setWeeks([]);
@@ -121,7 +121,7 @@ export default function HistoryPage() {
       <header className="page-header">
         <button className="back-link" type="button" onClick={() => router.push("/admin")}>‹ 返回排班管理</button>
         <h1>历史排班</h1>
-        <p>开始日期不晚于今天的排班周 · 仅供预览</p>
+        <p>开始日期早于今天的排班周 · 仅供预览</p>
       </header>
       {message ? <div className="toast-pill">{message}</div> : null}
       <section className="admin-section">
@@ -137,7 +137,7 @@ export default function HistoryPage() {
         {loading ? (
           <div className="loading-spinner"><div className="spinner" /><span>加载中...</span></div>
         ) : weeks.length === 0 ? (
-          <div className="empty-state"><strong>暂无历史排班</strong><span>排班周开始后会自动出现在这里。</span></div>
+          <div className="empty-state"><strong>暂无历史排班</strong><span>开始日期早于今天的排班周会自动出现在这里。</span></div>
         ) : (
           <div className="history-list">
             {weeks.map((week) => (
@@ -186,7 +186,7 @@ export default function HistoryPage() {
               <strong>全部历史排班</strong>
               <span>共 {weeks.length} 个排班周</span>
             </div>
-            <p className="delete-week-warning">所有开始日期不晚于今天的排班周都会被删除，删除后无法恢复。</p>
+            <p className="delete-week-warning">所有开始日期早于今天的排班周都会被删除，删除后无法恢复。</p>
             <div className="card-actions-row">
               <button className="btn-ghost" type="button" disabled={working} onClick={() => setShowClearConfirm(false)}>取消</button>
               <button className="btn-primary btn-danger" type="button" disabled={working} onClick={() => void clearHistory()}>

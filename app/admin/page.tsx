@@ -256,6 +256,16 @@ export default function AdminPage() {
     }).length,
   })), [riderStatusMap, teams, weekRiders]);
 
+  const defaultAutoFillSlotNames = useMemo(() => {
+    if (!activeWeek) return [];
+    const defaultSlotIds = new Set(activeWeek.default_slot_ids ?? []);
+    const requiredSlots = activeWeek.required_slots ?? 0;
+    return selectableSlots
+      .filter((slot) => defaultSlotIds.has(slot.id))
+      .slice(0, requiredSlots)
+      .map((slot) => slot.name);
+  }, [activeWeek, selectableSlots]);
+
   const restCounts = useMemo(() => {
     const counts: Record<string, { used: number; limit: number }> = {};
     const visibleTeams = groupFilter
@@ -796,7 +806,7 @@ export default function AdminPage() {
         supabase.from("week_import_snapshots").select("week_id"),
       ]);
       if (weeksRes.data) {
-        const upcomingWeeks = weeksRes.data.filter((week) => week.start_date > getTodayKey());
+        const upcomingWeeks = weeksRes.data.filter((week) => week.start_date >= getTodayKey());
         setWeeks(upcomingWeeks);
         const savedWeekId = typeof window !== "undefined" ? localStorage.getItem("admin-selected-week-id") : null;
         const savedWeek = savedWeekId ? upcomingWeeks.find((w) => w.id === savedWeekId) : null;
@@ -905,7 +915,7 @@ export default function AdminPage() {
       .on("postgres_changes", { event: "*", schema: "public", table: "schedule_weeks" }, async () => {
         const { data } = await supabase.from("schedule_weeks").select("*").order("created_at", { ascending: false });
         if (data) {
-          const upcomingWeeks = data.filter((week) => week.start_date > getTodayKey());
+          const upcomingWeeks = data.filter((week) => week.start_date >= getTodayKey());
           setWeeks(upcomingWeeks);
           setActiveWeek((cur) => upcomingWeeks.find((w) => w.id === cur?.id) ?? upcomingWeeks.find((w) => w.is_active) ?? upcomingWeeks[0] ?? null);
         }
@@ -1052,6 +1062,14 @@ export default function AdminPage() {
       setMessage("请填写完整的名称和日期");
       return;
     }
+    if (newWeekStart < getTodayKey()) {
+      setMessage("排班周开始日期不能早于今天");
+      return;
+    }
+    if (newWeekEnd < newWeekStart) {
+      setMessage("结束日期不能早于开始日期");
+      return;
+    }
     setCreating(true);
     setMessage(null);
     const { data, error } = await supabase.from("schedule_weeks").insert({
@@ -1067,7 +1085,7 @@ export default function AdminPage() {
       return;
     }
     if (data) {
-      if (data.start_date > getTodayKey()) {
+      if (data.start_date >= getTodayKey()) {
         setWeeks((cur) => [data, ...cur]);
       }
       setShowCreateModal(false);
@@ -1207,6 +1225,8 @@ export default function AdminPage() {
         </div>
         {loadingWeeks ? (
           <div className="loading-spinner"><div className="spinner" /><span>加载中...</span></div>
+        ) : weeks.length === 0 ? (
+          <div className="empty-state">暂无当前排班周，开始日期早于今天的排班周请前往历史排班查看。</div>
         ) : (
           <div className="config-grid">
             {weeks.map((week) => (
@@ -1632,6 +1652,9 @@ export default function AdminPage() {
             <p className="complete-confirm-copy">
               系统会保留已提交的出勤时段和排休信息，并按当前配置完成剩余排班。
             </p>
+            <p className="complete-confirm-copy">
+              默认补全时段：{defaultAutoFillSlotNames.length > 0 ? defaultAutoFillSlotNames.join("、") : "未配置"}
+            </p>
             <div className="complete-team-summary">
               <span className="team-autofill-title">自动补全</span>
               <div className="team-autofill-items">
@@ -1745,6 +1768,7 @@ export default function AdminPage() {
                 className="clean-input"
                 type="date"
                 value={newWeekStart}
+                min={getTodayKey()}
                 onChange={(e) => setNewWeekStart(e.target.value)}
               />
             </div>
@@ -1754,6 +1778,7 @@ export default function AdminPage() {
                 className="clean-input"
                 type="date"
                 value={newWeekEnd}
+                min={newWeekStart || getTodayKey()}
                 onChange={(e) => setNewWeekEnd(e.target.value)}
               />
             </div>

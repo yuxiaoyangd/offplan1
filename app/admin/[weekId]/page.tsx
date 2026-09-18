@@ -348,12 +348,22 @@ export default function WeekEditPage() {
               <thead>
                 <tr>
                   <th>小队</th>
-                  {weekDays.map((day) => (
-                    <th key={day.key}>
-                      <strong>{day.weekdayLabel}</strong>
-                      <span>{day.shortDate}</span>
-                    </th>
-                  ))}
+                  {weekDays.map((day) => {
+                    const configuredRestCount = teams.reduce(
+                      (total, team) => total + (limits[`${team.id}:${day.key}`] ?? getDefaultLimit(day.key)),
+                      0,
+                    );
+                    const staffingRate = riders.length > 0
+                      ? (((riders.length - configuredRestCount) / riders.length) * 100).toFixed(1).replace(/\.0$/, "")
+                      : "0";
+                    return (
+                      <th key={day.key}>
+                        <strong>{day.weekdayLabel}</strong>
+                        <span>{day.shortDate}</span>
+                        <span>排班率：{staffingRate}%</span>
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
