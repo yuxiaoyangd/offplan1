@@ -414,6 +414,11 @@ select:focus-visible,
 }
 
 @media (max-width: 680px) {
+  .overview-summary-panel {
+    width: 100%;
+    margin-left: 0;
+  }
+
   .overview-quick-stats {
     width: 100%;
     display: flex;
@@ -433,6 +438,11 @@ select:focus-visible,
 
   .overview-stat strong {
     font-size: 15px;
+  }
+
+  .overview-slot-rates {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .complete-team-summary {
@@ -696,12 +706,20 @@ select:focus-visible,
   align-items: center;
 }
 
+.overview-summary-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  margin-left: auto;
+}
+
 .overview-quick-stats {
   display: flex;
   flex-wrap: wrap;
   align-items: stretch;
   gap: 6px;
-  margin-left: auto;
+  margin-left: 0;
 }
 
 .overview-stat {
@@ -733,6 +751,37 @@ select:focus-visible,
 
 .overview-stat.mismatch strong {
   color: #dc2626;
+}
+
+.overview-slot-rates {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 0;
+}
+
+.overview-slot-rates-title {
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.overview-slot-rates-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+.overview-slot-rate {
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.overview-slot-rate strong {
+  margin-right: 5px;
+  color: var(--text-muted);
+  font-weight: 500;
 }
 
 .overview-header-loading {

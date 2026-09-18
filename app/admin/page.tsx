@@ -246,6 +246,28 @@ export default function AdminPage() {
     [limits],
   );
 
+  const slotSelectionRates = useMemo(() => {
+    const validRiderIds = new Set(weekRiders.map((rider) => rider.rider_id));
+    return selectableSlots
+      .map((slot) => {
+        const selectedRiderIds = new Set(
+          schedules
+            .filter((schedule) => (
+              schedule.slot_id === slot.id
+              && schedule.is_selected === true
+              && validRiderIds.has(schedule.rider_id)
+            ))
+            .map((schedule) => schedule.rider_id),
+        );
+        const selectedCount = selectedRiderIds.size;
+        const rateValue = weekRiders.length > 0 ? (selectedCount / weekRiders.length) * 100 : 0;
+        const rate = rateValue.toFixed(1).replace(/\.0$/, "");
+        return { id: slot.id, name: slot.name, selectedCount, rate, rateValue };
+      })
+      .filter((slot) => slot.selectedCount > 0)
+      .sort((a, b) => b.rateValue - a.rateValue || a.name.localeCompare(b.name, "zh-CN"));
+  }, [schedules, selectableSlots, weekRiders]);
+
   const teamAutoFillCounts = useMemo(() => teams.map((team) => ({
     id: team.id,
     name: team.name,
@@ -1330,19 +1352,33 @@ export default function AdminPage() {
               <p>{formatWeekRange(activeWeek.start_date, activeWeek.end_date)}</p>
             </div>
             {overviewReady ? (
-              <div className="overview-quick-stats">
-                <div className="overview-stat">
-                  <span>已排班</span>
-                  <strong>{namesWithShifts.size}/{weekRiders.length}</strong>
+              <div className="overview-summary-panel">
+                <div className="overview-quick-stats">
+                  <div className="overview-stat">
+                    <span>已排班</span>
+                    <strong>{namesWithShifts.size}/{weekRiders.length}</strong>
+                  </div>
+                  <div className="overview-stat">
+                    <span>已排休</span>
+                    <strong>{restedRiderCount}/{weekRiders.length}</strong>
+                  </div>
+                  <div className={`overview-stat ${configuredRestSlotCount === weekRiders.length ? "" : "mismatch"}`}>
+                    <span>已配置休息名额</span>
+                    <strong>{configuredRestSlotCount}/{weekRiders.length}</strong>
+                  </div>
                 </div>
-                <div className="overview-stat">
-                  <span>已排休</span>
-                  <strong>{restedRiderCount}/{weekRiders.length}</strong>
-                </div>
-                <div className={`overview-stat ${configuredRestSlotCount === weekRiders.length ? "" : "mismatch"}`}>
-                  <span>已配置休息名额</span>
-                  <strong>{configuredRestSlotCount}/{weekRiders.length}</strong>
-                </div>
+                {slotSelectionRates.length > 0 ? (
+                  <div className="overview-slot-rates">
+                    <span className="overview-slot-rates-title">已选时段占比</span>
+                    <div className="overview-slot-rates-list">
+                      {slotSelectionRates.map((slot) => (
+                        <span className="overview-slot-rate" key={slot.id}>
+                          <strong>{slot.name}</strong> {slot.rate}%
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ) : <span className="overview-header-loading">加载中...</span>}
           </div>
