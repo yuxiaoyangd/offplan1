@@ -25,7 +25,7 @@ function getTodayKey() {
 }
 
 type BulkActionType = "apply-default" | "apply-slot" | "set-rest" | "clear-rest" | "clear-schedules";
-type QuickFilterKey = "random" | "unselected" | "noRest" | "incomplete" | "untouched";
+type QuickFilterKey = "random" | "unselected" | "noRest" | "incomplete";
 type RiderStatus = {
   hasRest: boolean;
   missingDays: number;
@@ -140,11 +140,12 @@ export default function AdminPage() {
   const [showAdvancedTools, setShowAdvancedTools] = useState(false);
   const [showCompleteConfirm, setShowCompleteConfirm] = useState(false);
   const [showClearSchedulesConfirm, setShowClearSchedulesConfirm] = useState(false);
+  const [showApplySlotConfirm, setShowApplySlotConfirm] = useState(false);
   const [completeLoading, setCompleteLoading] = useState(false);
 
   const [savingWeekId, setSavingWeekId] = useState<string | null>(null);
   const [showPendingOnly, setShowPendingOnly] = useState(false);
-  const [applySlotId, setApplySlotId] = useState("");
+  const [applySlotIds, setApplySlotIds] = useState<string[]>([]);
   const [searchText, setSearchText] = useState("");
   const [groupFilter, setGroupFilter] = useState("");
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -355,7 +356,6 @@ export default function AdminPage() {
       unselected: [],
       noRest: [],
       incomplete: [],
-      untouched: [],
     };
     for (const rider of weekRiders) {
       const status = riderStatusMap[rider.rider_id];
@@ -372,9 +372,6 @@ export default function AdminPage() {
       if (status.missingDays > 0) {
         result.incomplete.push(rider.rider_id);
       }
-      if (status.totalSelected === 0 && !status.hasRest) {
-        result.untouched.push(rider.rider_id);
-      }
     }
     return result;
   }, [weekRiders, riderStatusMap]);
@@ -382,8 +379,15 @@ export default function AdminPage() {
   const filteredRequestSummaries = useMemo(() => {
     let items = requestSummaries;
     if (searchText.trim()) {
-      const lower = searchText.toLowerCase();
-      items = items.filter((item) => item.riderName.toLowerCase().includes(lower));
+      const keywords = searchText
+        .trim()
+        .split(/[\s,，、]+/)
+        .map((keyword) => keyword.toLowerCase())
+        .filter(Boolean);
+      items = items.filter((item) => {
+        const riderName = item.riderName.toLowerCase();
+        return keywords.some((keyword) => riderName.includes(keyword));
+      });
     }
     if (groupFilter) {
       items = items.filter((item) => riderMap[item.riderId]?.team_id === groupFilter);
@@ -474,16 +478,16 @@ export default function AdminPage() {
           responseMessage = `已套用默认时段（${data.processed}人）`;
         }
       } else if (action === "apply-slot") {
-        if (!applySlotId) { setMessage("请选择要套用的时段"); setBulkLoading(false); setPendingAction(null); return; }
+        if (applySlotIds.length === 0) { setMessage("请选择要套用的时段"); setBulkLoading(false); setPendingAction(null); return; }
         const { error, data } = await supabase.rpc("bulk_apply_slot", {
           p_week_id: activeWeek.id,
           p_rider_ids: riderIds,
-          p_slot_id: applySlotId,
+          p_slot_ids: applySlotIds,
         });
         if (error) throw error;
-        const slotName = slotMap[applySlotId]?.name ?? "";
+        const slotNames = applySlotIds.map((slotId) => slotMap[slotId]?.name).filter(Boolean);
         if (data?.processed !== undefined) {
-          responseMessage = `已套用「${slotName}」${data.processed} 条${data.skipped > 0 ? `，跳过 ${data.skipped} 个排休日` : ""}`;
+          responseMessage = `已套用「${slotNames.join("、")}」${data.processed} 天${data.skipped > 0 ? `，跳过 ${data.skipped} 个排休日` : ""}`;
         }
       } else if (action === "set-rest") {
         const { error, data } = await supabase.rpc("bulk_set_rider_rest", {
@@ -518,6 +522,14 @@ export default function AdminPage() {
           responseMessage = `已清空排班 ${data.removed} 条`;
         }
       }
+      if (action === "apply-slot") {
+        try {
+          const latestSchedules = await fetchAllWeekSchedules(activeWeek.id);
+          if (activeWeekIdRef.current === activeWeek.id) setSchedules(latestSchedules);
+        } catch {
+          responseMessage += "，但页面刷新失败，请手动刷新查看最新状态";
+        }
+      }
       setMessage(responseMessage);
       resetSelection();
     } catch (err: unknown) {
@@ -527,7 +539,7 @@ export default function AdminPage() {
       setPendingAction(null);
       setBulkRestDate("");
     }
-  }, [activeWeek, bulkRestDate, resetSelection, selectedRiderIds, applySlotId, slotMap]);
+  }, [activeWeek, bulkRestDate, resetSelection, selectedRiderIds, applySlotIds, slotMap]);
 
   function requestClearSchedules() {
     if (selectedRiderIds.size === 0) {
@@ -684,6 +696,23 @@ export default function AdminPage() {
     } finally {
       setExportingWeekId(null);
     }
+  }
+
+  function requestApplySlot() {
+    if (selectedRiderIds.size === 0) {
+      setMessage("请选择至少一位骑手");
+      return;
+    }
+    if (applySlotIds.length === 0) {
+      setMessage("请选择要套用的时段");
+      return;
+    }
+    setShowApplySlotConfirm(true);
+  }
+
+  async function confirmApplySlot() {
+    await handleBulkAction("apply-slot");
+    setShowApplySlotConfirm(false);
   }
 
   async function handleRestPreviewExport(week: ScheduleWeekRow) {
@@ -857,7 +886,7 @@ export default function AdminPage() {
     setShowPendingOnly(false);
     setSearchText("");
     setGroupFilter("");
-    setApplySlotId("");
+    setApplySlotIds([]);
     setBulkRestDate("");
     setLoadedOverviewWeekId(null);
 
@@ -1440,7 +1469,6 @@ export default function AdminPage() {
                       { key: "unselected", label: "未选择待安排" },
                       { key: "noRest", label: "缺排休" },
                       { key: "incomplete", label: "时段不足" },
-                      { key: "untouched", label: "未生成" },
                     ] as { key: QuickFilterKey; label: string }[]).map(({ key, label }) => (
                       <button
                         key={key}
@@ -1452,24 +1480,13 @@ export default function AdminPage() {
                         <small style={{ opacity: 0.6 }}>（{riderIdsByFilter[key].length}）</small>
                       </button>
                     ))}
-                    <button
-                      className={`chip ${showPendingOnly ? "chip-active" : ""}`}
-                      type="button"
-                      onClick={() => setShowPendingOnly((prev) => !prev)}
-                    >
-                      未完成排班
-                      <small style={{ opacity: 0.6 }}>（{weekRiders.filter((r) => {
-                        const status = riderStatusMap[r.rider_id];
-                        return !status || status.missingDays > 0;
-                      }).length}）</small>
-                    </button>
                 </div>
 
                 <div className="filter-bar">
                   <input
                     className="filter-input"
                     type="text"
-                    placeholder="搜索骑手姓名..."
+                    placeholder="搜索骑手姓名（支持多个姓名）..."
                     value={searchText}
                     onChange={(e) => setSearchText(e.target.value)}
                   />
@@ -1483,6 +1500,15 @@ export default function AdminPage() {
                       <option key={g.id} value={g.id}>{g.name}</option>
                     ))}
                   </select>
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "0 4px", fontSize: "13px", color: "var(--text-muted)", whiteSpace: "nowrap" }}>
+                    <input
+                      type="checkbox"
+                      checked={showPendingOnly}
+                      onChange={(event) => setShowPendingOnly(event.target.checked)}
+                    />
+                    只看未完成
+                    <span>（{weekRiders.filter((rider) => (riderStatusMap[rider.rider_id]?.missingDays ?? 0) > 0).length}）</span>
+                  </label>
                   {(searchText || groupFilter || showPendingOnly || quickFilter) ? (
                     <button className="btn-ghost btn-sm" type="button" onClick={() => { setSearchText(""); setGroupFilter(""); setShowPendingOnly(false); setQuickFilter(null); }}>
                       清除筛选
@@ -1504,9 +1530,11 @@ export default function AdminPage() {
                         {selectableSlots.map((slot) => (
                           <button
                             key={slot.id}
-                            className={`chip ${applySlotId === slot.id ? "chip-active" : ""}`}
+                            className={`chip ${applySlotIds.includes(slot.id) ? "chip-active" : ""}`}
                             type="button"
-                            onClick={() => setApplySlotId(applySlotId === slot.id ? "" : slot.id)}
+                            onClick={() => setApplySlotIds((current) => current.includes(slot.id)
+                              ? current.filter((id) => id !== slot.id)
+                              : [...current, slot.id])}
                           >
                             {slot.name}
                           </button>
@@ -1514,12 +1542,14 @@ export default function AdminPage() {
                       </div>
                     )}
                     <footer>
-                      <div className="bulk-meta">{applySlotId ? `已选：${slotMap[applySlotId]?.name ?? ""}` : "请选择时段"}</div>
+                      <div className="bulk-meta">{applySlotIds.length > 0
+                        ? `已选：${applySlotIds.map((id) => slotMap[id]?.name).filter(Boolean).join("、")}`
+                        : "请选择时段"}</div>
                       <button
                         className="btn-primary btn-sm"
                         type="button"
-                        onClick={() => void handleBulkAction("apply-slot")}
-                        disabled={bulkLoading || !applySlotId}
+                        onClick={requestApplySlot}
+                        disabled={bulkLoading || applySlotIds.length === 0}
                       >
                         {pendingAction === "apply-slot" ? "处理中..." : "套用"}
                       </button>
@@ -1752,6 +1782,44 @@ export default function AdminPage() {
                 disabled={bulkLoading}
               >
                 {pendingAction === "clear-schedules" ? "清空中..." : "确认清空"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showApplySlotConfirm && (
+        <div
+          className="overlay"
+          onClick={() => {
+            if (!bulkLoading) setShowApplySlotConfirm(false);
+          }}
+        >
+          <div className="confirm-card" onClick={(event) => event.stopPropagation()}>
+            <h2>确认套用指定时段</h2>
+            <p className="complete-confirm-copy">
+              已选 {selectedRiderIds.size} 位骑手：{Array.from(selectedRiderIds).map((riderId) => riderMap[riderId]?.name ?? riderId).join("、")}
+            </p>
+            <p className="complete-confirm-copy">
+              将把非排休日的原有出勤时段替换为：{applySlotIds.map((slotId) => slotMap[slotId]?.name).filter(Boolean).join("、")}。
+            </p>
+            <p className="complete-confirm-copy">排休日保持不动。</p>
+            <div className="card-actions-row">
+              <button
+                className="btn-ghost"
+                type="button"
+                onClick={() => setShowApplySlotConfirm(false)}
+                disabled={bulkLoading}
+              >
+                取消
+              </button>
+              <button
+                className="btn-primary"
+                type="button"
+                onClick={() => void confirmApplySlot()}
+                disabled={bulkLoading}
+              >
+                {pendingAction === "apply-slot" ? "套用中..." : "确认套用"}
               </button>
             </div>
           </div>
