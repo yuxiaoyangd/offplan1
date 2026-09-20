@@ -134,3 +134,13 @@ export type ExportXlsData = {
   baseColumns: number;
   generated: boolean;
 };
+
+export type RiderFeedbackRow = {
+  id: string;
+  city: string;
+  income_satisfaction: number;
+  management_satisfaction: number;
+  other_feedback: string | null;
+  rider_name: string | null;
+  created_at: string;
+};

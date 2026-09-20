@@ -7,6 +7,7 @@
 create extension if not exists pgcrypto;
 
 -- ==================== 2. 清空旧数据 ====================
+drop table if exists public.rider_feedback cascade;
 drop table if exists public.rest_week_members cascade;
 drop table if exists public.rest_periods cascade;
 drop table if exists public.employee_week_shifts cascade;
@@ -133,6 +134,17 @@ create table public.week_import_snapshots (
   created_at timestamptz not null default now()
 );
 
+-- 骑手满意度反馈；城市由服务端根据请求 IP 推断，不保存原始 IP
+create table public.rider_feedback (
+  id uuid primary key default gen_random_uuid(),
+  city text not null check (char_length(trim(city)) between 1 and 40),
+  income_satisfaction smallint not null check (income_satisfaction between 1 and 5),
+  management_satisfaction smallint not null check (management_satisfaction between 1 and 5),
+  other_feedback text check (other_feedback is null or char_length(other_feedback) <= 2000),
+  rider_name text check (rider_name is null or char_length(trim(rider_name)) between 1 and 40),
+  created_at timestamptz not null default now()
+);
+
 -- ==================== 4. 索引 ====================
 
 -- 每个骑手每周最多一条排休记录
@@ -148,6 +160,8 @@ create index idx_ts_week on public.time_slots (week_id, sort_order);
 create index idx_riders_week on public.riders (week_id, team_id);
 create index idx_rdl_week on public.rest_day_limits (week_id, team_id);
 create index idx_sw_active on public.schedule_weeks (is_active, start_date desc);
+create index idx_rider_feedback_created_at on public.rider_feedback (created_at desc);
+create index idx_rider_feedback_city on public.rider_feedback (city);
 
 -- ==================== 5. 函数 ====================
 
@@ -1737,6 +1751,7 @@ alter table public.riders enable row level security;
 alter table public.rest_day_limits enable row level security;
 alter table public.rider_schedules enable row level security;
 alter table public.week_import_snapshots enable row level security;
+alter table public.rider_feedback enable row level security;
 
 create policy "public read" on public.schedule_weeks for select to anon, authenticated using (true);
 create policy "public write" on public.schedule_weeks for all to anon, authenticated using (true) with check (true);
@@ -1752,6 +1767,7 @@ create policy "public read" on public.rider_schedules for select to anon, authen
 create policy "public write" on public.rider_schedules for all to anon, authenticated using (true) with check (true);
 create policy "public read" on public.week_import_snapshots for select to anon, authenticated using (true);
 create policy "public write" on public.week_import_snapshots for all to anon, authenticated using (true) with check (true);
+create policy "rider feedback insert" on public.rider_feedback for insert to anon, authenticated with check (true);
 
 -- ==================== 8. 权限 ====================
 
@@ -1763,6 +1779,7 @@ grant all on public.riders to anon, authenticated;
 grant all on public.rest_day_limits to anon, authenticated;
 grant all on public.rider_schedules to anon, authenticated;
 grant all on public.week_import_snapshots to anon, authenticated;
+grant insert on public.rider_feedback to anon, authenticated;
 
 grant execute on function public.import_xls_week to anon, authenticated;
 grant execute on function public.ensure_default_team to anon, authenticated;

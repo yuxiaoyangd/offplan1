@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { buildDaysFromRange, formatWeekRange } from "@/lib/date";
 import { supabase } from "@/lib/supabase";
@@ -414,11 +415,10 @@ export default function WeekSchedulePage() {
       || draftMode === "specified"
     ),
   );
-  const hasRongbaoAd = Boolean(rider && schedulesLoaded && mode);
   const noRestQuota = Object.keys(limits).length > 0 && Object.values(limits).every((v) => v === 0);
 
   return (
-    <main className={`page-container employee-page ${hasFixedSubmit ? "with-fixed-submit" : ""} ${hasRongbaoAd ? "with-rongbao-ad" : ""}`}>
+    <main className={`page-container employee-page ${hasFixedSubmit ? "with-fixed-submit" : ""}`}>
       {confirmRandom ? (
         <div className="confirm-overlay">
           <section className="confirm-card employee-confirm-card">
@@ -498,38 +498,44 @@ export default function WeekSchedulePage() {
       {message ? <div className="toast-pill">{message}</div> : null}
 
       {rider && schedulesLoaded && mode === "random" ? (
-        <section className="random-result">
-          <div className="result-mark">已提交</div>
-          <h2>已选择随机排休</h2>
-          <p>将随机安排一天休息。</p>
-          <div className="random-shift-summary">
-            出勤时段：{uniformSlotIds.map((id) => slotMap[id]?.name).filter(Boolean).join("、") || "已提交"}
-          </div>
-          <div className="submitted-note">已选择随机排休</div>
-        </section>
+        <>
+          <section className="random-result">
+            <div className="result-mark">已提交</div>
+            <h2>已选择随机排休</h2>
+            <p>将随机安排一天休息。</p>
+            <div className="random-shift-summary">
+              出勤时段：{uniformSlotIds.map((id) => slotMap[id]?.name).filter(Boolean).join("、") || "已提交"}
+            </div>
+            <div className="submitted-note">已选择随机排休</div>
+          </section>
+          <Link className="employee-feedback-link" href="/feedback">满意度反馈</Link>
+        </>
       ) : null}
 
       {rider && schedulesLoaded && mode === "specified" ? (
-        <section className="random-result specified-result">
-          <div className="result-mark">已提交</div>
-          <h2>已指定排休</h2>
-          <div className="specified-result-details">
-            <div>
-              <span>排休日</span>
-              <strong>
-                {specifiedRestDay?.weekdayLabel ?? "已选择"}
-                {specifiedRestDay?.shortDate
-                  ? ` · ${specifiedRestDay.shortDate}`
-                  : ""}
-              </strong>
+        <>
+          <section className="random-result specified-result">
+            <div className="result-mark">已提交</div>
+            <h2>已指定排休</h2>
+            <div className="specified-result-details">
+              <div>
+                <span>排休日</span>
+                <strong>
+                  {specifiedRestDay?.weekdayLabel ?? "已选择"}
+                  {specifiedRestDay?.shortDate
+                    ? ` · ${specifiedRestDay.shortDate}`
+                    : ""}
+                </strong>
+              </div>
+              <div>
+                <span>出勤时段</span>
+                <strong>{uniformSlotIds.map((id) => slotMap[id]?.name).filter(Boolean).join("、") || "已选择"}</strong>
+              </div>
             </div>
-            <div>
-              <span>出勤时段</span>
-              <strong>{uniformSlotIds.map((id) => slotMap[id]?.name).filter(Boolean).join("、") || "已选择"}</strong>
-            </div>
-          </div>
-          <div className="submitted-note">排休意愿已确认</div>
-        </section>
+            <div className="submitted-note">排休意愿已确认</div>
+          </section>
+          <Link className="employee-feedback-link" href="/feedback">满意度反馈</Link>
+        </>
       ) : null}
 
       {rider && schedulesLoaded && !mode && !draftMode ? (
@@ -669,7 +675,6 @@ export default function WeekSchedulePage() {
         <div className="empty-state">加载排班数据中...</div>
       ) : null}
 
-      {rider && schedulesLoaded && mode ? <RongbaoAd /> : null}
     </main>
   );
 }
