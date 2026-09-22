@@ -58,6 +58,10 @@ export default function HistoryDetailPage() {
         <button className="back-link" type="button" onClick={() => router.push("/admin/history")}>‹ 返回历史排班</button>
         <h1>{week.name || formatWeekRange(week.start_date, week.end_date)}</h1>
         <p>{week.start_date} ~ {week.end_date} · 只读预览</p>
+        <div className="history-detail-actions">
+          <span className="history-feedback-status">{week.show_feedback_entry ? "已开启投诉建议入口" : "未开启投诉建议入口"}</span>
+          <button className="btn-ghost btn-sm" type="button" onClick={() => router.push(`/admin/${week.id}`)}>编辑配置</button>
+        </div>
       </header>
       <section className="admin-section">
         <div className="history-summary"><span>{riders.length} 名骑手</span><span>{teams.length} 个小队</span><span>{slots.length} 个时段</span></div>

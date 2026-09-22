@@ -62,6 +62,7 @@ function createDraftWeek(): ScheduleWeekRow {
     start_date: formatDateKey(monday),
     end_date: formatDateKey(sunday),
     is_active: true,
+    show_feedback_entry: false,
     required_slots: 1,
     default_slot_ids: null,
   };
@@ -152,6 +153,8 @@ export default function AdminPage() {
   const [newWeekName, setNewWeekName] = useState("");
   const [newWeekStart, setNewWeekStart] = useState("");
   const [newWeekEnd, setNewWeekEnd] = useState("");
+  const [newShowFeedbackEntry, setNewShowFeedbackEntry] = useState(false);
+  const [showFeedbackPreview, setShowFeedbackPreview] = useState(false);
   const [creating, setCreating] = useState(false);
   const [importWeek, setImportWeek] = useState<ScheduleWeekRow | null>(null);
   const [exportingWeekId, setExportingWeekId] = useState<string | null>(null);
@@ -1019,6 +1022,7 @@ export default function AdminPage() {
       start_date: week.start_date,
       end_date: week.end_date,
       is_active: week.is_active,
+      show_feedback_entry: week.show_feedback_entry ?? false,
       required_slots: week.required_slots ?? 1,
       default_slot_ids: week.default_slot_ids,
     };
@@ -1128,6 +1132,7 @@ export default function AdminPage() {
       start_date: newWeekStart,
       end_date: newWeekEnd,
       is_active: true,
+      show_feedback_entry: newShowFeedbackEntry,
       required_slots: 1,
     }).select().single();
     setCreating(false);
@@ -1143,6 +1148,7 @@ export default function AdminPage() {
       setNewWeekName("");
       setNewWeekStart("");
       setNewWeekEnd("");
+      setNewShowFeedbackEntry(false);
       setMessage("排休周已创建，点击编辑配置进行详细设置");
     }
   }
@@ -1868,7 +1874,7 @@ export default function AdminPage() {
       {/* 创建周弹窗 */}
       {showCreateModal && (
         <div className="overlay" onClick={() => setShowCreateModal(false)}>
-          <div className="confirm-card" onClick={(e) => e.stopPropagation()}>
+          <div className="confirm-card create-week-dialog" onClick={(e) => e.stopPropagation()}>
             <h2>创建排班周</h2>
             <div className="input-group">
               <label>排班名称</label>
@@ -1901,6 +1907,14 @@ export default function AdminPage() {
                 onChange={(e) => setNewWeekEnd(e.target.value)}
               />
             </div>
+            <label className="switch-label week-feedback-setting" title="开启后，骑手提交排休成功后可以看到“骑手投诉或建议”入口">
+              <input type="checkbox" checked={newShowFeedbackEntry} onChange={(e) => setNewShowFeedbackEntry(e.target.checked)} />
+              显示投诉或建议入口
+              <button className="config-info-wrap" type="button" aria-label="查看骑手提交成功页面示例"
+                onClick={(event) => { event.preventDefault(); event.stopPropagation(); setShowFeedbackPreview(true); }}>
+                <span className="config-info-icon" aria-hidden="true">i</span>
+              </button>
+            </label>
             <div className="card-actions-row" style={{ marginTop: "16px" }}>
               <button className="btn-ghost" type="button" onClick={() => setShowCreateModal(false)}>取消</button>
               <button className="btn-primary" type="button" onClick={handleCreateWeek} disabled={creating}>
@@ -1910,6 +1924,14 @@ export default function AdminPage() {
           </div>
         </div>
       )}
+      {showFeedbackPreview ? (
+        <div className="feedback-preview-overlay" role="dialog" aria-modal="true" aria-label="骑手提交成功页面示例" onClick={() => setShowFeedbackPreview(false)}>
+          <div className="feedback-preview-card" onClick={(event) => event.stopPropagation()}>
+            <button className="feedback-preview-close" type="button" aria-label="关闭示例图片" onClick={() => setShowFeedbackPreview(false)}>×</button>
+            <img src="/images/feedback-example.png" alt="骑手提交成功页面示例" />
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

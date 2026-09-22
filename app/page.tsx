@@ -45,7 +45,7 @@ export default function HomePage() {
             <p className="homepage-description">先看看今天的安排，再出发。愿你一路顺利，平安收工。</p>
             <Link className="homepage-feedback-link" href="/feedback">
               <span className="homepage-feedback-icon">☺</span>
-              <span><strong>满意度反馈</strong><small>可匿名对站点工作做建议或投诉</small></span>
+              <span><strong>骑手投诉或建议</strong><small>可匿名提交建议、投诉或满意度评价</small></span>
               <span className="homepage-feedback-arrow">›</span>
             </Link>
           </div>

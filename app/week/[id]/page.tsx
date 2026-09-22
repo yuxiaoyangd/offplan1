@@ -508,7 +508,13 @@ export default function WeekSchedulePage() {
             </div>
             <div className="submitted-note">已选择随机排休</div>
           </section>
-          <Link className="employee-feedback-link" href="/feedback">满意度反馈</Link>
+          {week.show_feedback_entry ? <Link className="employee-feedback-link" href="/feedback">
+            <svg className="employee-feedback-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="3" y="5" width="18" height="14" rx="2" />
+              <polyline points="3 7 12 13 21 7" />
+            </svg>
+            骑手投诉或建议
+          </Link> : null}
         </>
       ) : null}
 
@@ -534,7 +540,13 @@ export default function WeekSchedulePage() {
             </div>
             <div className="submitted-note">排休意愿已确认</div>
           </section>
-          <Link className="employee-feedback-link" href="/feedback">满意度反馈</Link>
+          {week.show_feedback_entry ? <Link className="employee-feedback-link" href="/feedback">
+            <svg className="employee-feedback-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="3" y="5" width="18" height="14" rx="2" />
+              <polyline points="3 7 12 13 21 7" />
+            </svg>
+            骑手投诉或建议
+          </Link> : null}
         </>
       ) : null}
 

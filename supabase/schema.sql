@@ -38,6 +38,7 @@ create table public.schedule_weeks (
   start_date date not null,
   end_date date not null,
   is_active boolean not null default true,
+  show_feedback_entry boolean not null default false,
   required_slots int not null default 1 check (required_slots >= 0 and required_slots <= 10),
   default_slot_ids uuid[] default null,
   created_at timestamptz not null default now(),

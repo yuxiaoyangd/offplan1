@@ -4,6 +4,7 @@ export type ScheduleWeekRow = {
   start_date: string;
   end_date: string;
   is_active: boolean;
+  show_feedback_entry: boolean;
   required_slots: number;
   default_slot_ids: string[] | null;
   created_at?: string;

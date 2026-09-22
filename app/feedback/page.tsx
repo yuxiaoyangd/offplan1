@@ -8,6 +8,7 @@ export default function FeedbackPage() {
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [anonymous, setAnonymous] = useState(true);
   const formRef = useRef<HTMLFormElement | null>(null);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -49,7 +50,7 @@ export default function FeedbackPage() {
       <div className="feedback-shell">
         <div className="feedback-topbar">
           <Link className="feedback-back" href="/">‹ 返回首页</Link>
-          <h1>满意度反馈</h1>
+          <h1>骑手投诉或建议</h1>
         </div>
         {submitted ? (
           <section className="feedback-success">
@@ -83,9 +84,29 @@ export default function FeedbackPage() {
               </div>
               <div className="feedback-rating-hints"><span>不满意</span><span>非常满意</span></div>
             </fieldset>
-            <label><span>其他反馈 <em>可选</em></span><textarea name="other-feedback" placeholder="在签约、管理过程或者有其他需要投诉、建议的内容" rows={5} /></label>
-            <label><span>是否留下你的姓名 <em>可选</em></span><input className="feedback-name-input" name="rider-name" type="text" placeholder="请输入姓名" /></label>
-            <p className="feedback-privacy-note">不填写姓名的情况下，你的反馈信息是完全保密的，不会透露任何个人的信息。</p>
+            <label><span>其他反馈 <em>可选</em></span><textarea name="other-feedback" placeholder="如在站点日常管理中遇到站长、骑士长或其他人员存在不公正对待、违规操作或廉洁方面等其他问题，可在此提交投诉或建议。" rows={5} /></label>
+            <div className="feedback-anonymous-toggle">
+              <div>
+                <strong>匿名提交</strong>
+              </div>
+              <label className="feedback-switch">
+                <input
+                  type="checkbox"
+                  checked={anonymous}
+                  onChange={(event) => setAnonymous(event.target.checked)}
+                  aria-label="匿名提交"
+                />
+                <span className="feedback-switch-track" aria-hidden="true" />
+              </label>
+            </div>
+            {!anonymous ? (
+              <>
+                <label><span>留下你的姓名 <em>可选</em></span><input className="feedback-name-input" name="rider-name" type="text" placeholder="请输入姓名" autoFocus /></label>
+                <p className="feedback-privacy-note">留下姓名后，方便我们在需要时联系你跟进反馈。</p>
+              </>
+            ) : (
+              <p className="feedback-privacy-note">你的信息完全匿名的，提交后不会收集任何个人信息。</p>
+            )}
             {errorMessage ? <p className="feedback-error" role="alert">{errorMessage}</p> : null}
             <button className="feedback-primary-button" type="submit" disabled={submitting}>{submitting ? "提交中…" : "提交反馈"}</button>
           </form>

@@ -33,6 +33,7 @@ export default function WeekEditPage() {
   const [schedules, setSchedules] = useState<RiderScheduleRow[]>([]);
   const [limits, setLimits] = useState<Record<string, number>>({});
   const [message, setMessage] = useState<string | null>(null);
+  const [showFeedbackPreview, setShowFeedbackPreview] = useState(false);
 
   const weekDays = useMemo(() => {
     if (!week) return [];
@@ -129,6 +130,7 @@ export default function WeekEditPage() {
       start_date: week.start_date,
       end_date: week.end_date,
       is_active: week.is_active,
+      show_feedback_entry: week.show_feedback_entry ?? false,
       required_slots: week.required_slots ?? 1,
       default_slot_ids: week.default_slot_ids,
     }).eq("id", weekId);
@@ -257,6 +259,15 @@ export default function WeekEditPage() {
             <input type="checkbox" checked={week.is_active}
               onChange={(e) => setWeek((cur) => cur ? { ...cur, is_active: e.target.checked } : null)} />
             发布此周
+          </label>
+          <label className="switch-label feedback-entry-setting">
+            <input type="checkbox" checked={week.show_feedback_entry ?? false}
+              onChange={(e) => setWeek((cur) => cur ? { ...cur, show_feedback_entry: e.target.checked } : null)} />
+            显示投诉或建议入口
+            <button className="config-info-wrap" type="button" aria-label="查看骑手提交成功页面示例"
+              onClick={(event) => { event.preventDefault(); event.stopPropagation(); setShowFeedbackPreview(true); }}>
+              <span className="config-info-icon" aria-hidden="true">i</span>
+            </button>
           </label>
         </div>
         <div className="config-section-actions">
@@ -406,6 +417,14 @@ export default function WeekEditPage() {
             <button className="btn-primary btn-sm" type="button" onClick={saveAllLimits}>保存名额</button>
           </div>
         </section>
+      ) : null}
+      {showFeedbackPreview ? (
+        <div className="feedback-preview-overlay" role="dialog" aria-modal="true" aria-label="骑手提交成功页面示例" onClick={() => setShowFeedbackPreview(false)}>
+          <div className="feedback-preview-card" onClick={(event) => event.stopPropagation()}>
+            <button className="feedback-preview-close" type="button" aria-label="关闭示例图片" onClick={() => setShowFeedbackPreview(false)}>×</button>
+            <img src="/images/feedback-example.png" alt="骑手提交成功页面示例" />
+          </div>
+        </div>
       ) : null}
     </main>
   );
