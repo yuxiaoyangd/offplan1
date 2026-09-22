@@ -223,7 +223,7 @@ export default function WeekEditPage() {
   return (
     <main className="page-container admin-page config-page">
       <header className="page-header">
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+        <div className="page-header-back-row">
           <button className="btn-ghost btn-sm" type="button" onClick={() => router.push("/admin")}>← 返回</button>
           <h1>排班配置</h1>
         </div>

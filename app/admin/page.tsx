@@ -1309,7 +1309,7 @@ export default function AdminPage() {
                 >
                   删除
                 </button>
-                <div className="input-group" style={{ paddingRight: "32px" }}>
+                <div className="input-group admin-week-card-head">
                   <strong className="card-title">{week.name || formatWeekRange(week.start_date, week.end_date)}</strong>
                   <span className="card-subtitle">
                     {week.start_date} ~ {week.end_date}
@@ -1439,7 +1439,7 @@ export default function AdminPage() {
             </div>
           ) : (
             <>
-          {weekRiders.length === 0 ? <p style={{ fontSize: "14px", color: "var(--text-muted)" }}>暂无骑手名单，请导入 XLS</p> : null}
+          {weekRiders.length === 0 ? <p className="admin-empty-note">暂无骑手名单，请导入 XLS</p> : null}
 
           {requestSummaries.length > 0 ? (
             <>
@@ -1483,7 +1483,7 @@ export default function AdminPage() {
                         onClick={() => applyQuickFilter(key)}
                       >
                         {label}
-                        <small style={{ opacity: 0.6 }}>（{riderIdsByFilter[key].length}）</small>
+                        <small className="chip-count">（{riderIdsByFilter[key].length}）</small>
                       </button>
                     ))}
                 </div>
@@ -1506,7 +1506,7 @@ export default function AdminPage() {
                       <option key={g.id} value={g.id}>{g.name}</option>
                     ))}
                   </select>
-                  <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "0 4px", fontSize: "13px", color: "var(--text-muted)", whiteSpace: "nowrap" }}>
+                  <label className="admin-filter-toggle">
                     <input
                       type="checkbox"
                       checked={showPendingOnly}
@@ -1520,7 +1520,7 @@ export default function AdminPage() {
                       清除筛选
                     </button>
                   ) : null}
-                  <span style={{ fontSize: "13px", color: "var(--text-muted)", marginLeft: "auto", whiteSpace: "nowrap" }}>
+                  <span className="admin-filter-count">
                     筛选 {filteredRequestSummaries.length}/{requestSummaries.length} 人
                   </span>
                 </div>
@@ -1532,7 +1532,7 @@ export default function AdminPage() {
                       <p>选择单个时段套用到选中骑手的非排休日</p>
                     </div>
                     {selectableSlots.length > 0 && (
-                      <div className="inline-input" style={{ flexWrap: "wrap" }}>
+                      <div className="inline-input inline-input-chips">
                         {selectableSlots.map((slot) => (
                           <button
                             key={slot.id}
@@ -1628,7 +1628,7 @@ export default function AdminPage() {
                 <table className="admin-table">
                   <thead>
                     <tr>
-                      <th style={{ width: "44px" }}>
+                      <th>
                         <input
                           ref={masterSelectRef}
                           type="checkbox"
@@ -1663,7 +1663,7 @@ export default function AdminPage() {
                     const status = riderStatusMap[item.riderId];
                     const isSelected = selectedRiderIds.has(item.riderId);
                     return (
-                      <tr key={item.riderId} style={isSelected ? { background: "rgba(245, 158, 11, 0.08)" } : undefined}>
+                      <tr key={item.riderId} className={isSelected ? "is-selected" : undefined}>
                         <td>
                           <input
                             type="checkbox"
@@ -1671,9 +1671,9 @@ export default function AdminPage() {
                             onChange={() => toggleRiderSelection(item.riderId)}
                           />
                         </td>
-                        <td style={{ textAlign: "left" }}>
-                          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                            <span style={{ fontWeight: 600 }}>{item.riderName}</span>
+                        <td>
+                          <div className="rider-cell">
+                            <span className="rider-name">{item.riderName}</span>
                             <span className="rider-team-label">{item.riderId}</span>
                             <span className="rider-team-label">
                               {teams.find((team) => team.id === riderMap[item.riderId]?.team_id)?.name ?? "默认小队"}
@@ -1915,7 +1915,7 @@ export default function AdminPage() {
                 <span className="config-info-icon" aria-hidden="true">i</span>
               </button>
             </label>
-            <div className="card-actions-row" style={{ marginTop: "16px" }}>
+            <div className="card-actions-row create-week-actions">
               <button className="btn-ghost" type="button" onClick={() => setShowCreateModal(false)}>取消</button>
               <button className="btn-primary" type="button" onClick={handleCreateWeek} disabled={creating}>
                 {creating ? "创建中..." : "创建"}
