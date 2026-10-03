@@ -2120,6 +2120,27 @@ select:focus-visible,
   font-weight: 400;
 }
 
+.quota-table tbody th .quota-summary {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.quota-table tbody th .quota-summary-configured {
+  color: var(--accent-color);
+  font-weight: 700;
+}
+
+.quota-table tbody th .quota-summary-total {
+  display: inline;
+  margin-top: 0;
+  color: var(--text-muted);
+  font-size: inherit;
+  font-weight: 400;
+}
+
 .quota-input {
   width: 58px;
   height: 36px;

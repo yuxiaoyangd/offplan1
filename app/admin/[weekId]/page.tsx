@@ -378,11 +378,23 @@ export default function WeekEditPage() {
                 </tr>
               </thead>
               <tbody>
-                {teams.map((team) => (
+                {teams.map((team) => {
+                  const teamRiderCount = riders.filter((rider) => rider.team_id === team.id).length;
+                  const configuredQuotaCount = weekDays.reduce(
+                    (total, day) => total + (limits[`${team.id}:${day.key}`] ?? getDefaultLimit(day.key)),
+                    0,
+                  );
+                  return (
                   <tr key={team.id}>
                     <th>
                       <strong>{team.name}</strong>
-                      <span>{riders.filter((rider) => rider.team_id === team.id).length} 人</span>
+                      <span
+                        className="quota-summary"
+                        aria-label={`已配置休息名额 ${configuredQuotaCount}，总人数 ${teamRiderCount}`}
+                      >
+                        <strong className="quota-summary-configured">{configuredQuotaCount}</strong>
+                        <span className="quota-summary-total"> / {teamRiderCount}</span>
+                      </span>
                     </th>
                     {weekDays.map((day) => {
                       const key = `${team.id}:${day.key}`;
@@ -409,7 +421,8 @@ export default function WeekEditPage() {
                       );
                     })}
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
