@@ -250,27 +250,31 @@ export default function AdminPage() {
     [limits],
   );
 
-  const slotSelectionRates = useMemo(() => {
+  const dailySlotSelectionRates = useMemo(() => {
     const validRiderIds = new Set(weekRiders.map((rider) => rider.rider_id));
-    return selectableSlots
-      .map((slot) => {
-        const selectedRiderIds = new Set(
-          schedules
-            .filter((schedule) => (
-              schedule.slot_id === slot.id
-              && schedule.is_selected === true
-              && validRiderIds.has(schedule.rider_id)
-            ))
-            .map((schedule) => schedule.rider_id),
-        );
-        const selectedCount = selectedRiderIds.size;
+    const validDayKeys = new Set(weekDays.map((day) => day.key));
+    const selectedRidersByDayAndSlot = new Map<string, Set<string>>();
+    for (const schedule of schedules) {
+      if (!schedule.slot_id || !schedule.is_selected || !validDayKeys.has(schedule.work_date)
+        || !selectableSlotIds.has(schedule.slot_id) || !validRiderIds.has(schedule.rider_id)) continue;
+      const key = `${schedule.work_date}:${schedule.slot_id}`;
+      const riderIds = selectedRidersByDayAndSlot.get(key) ?? new Set<string>();
+      riderIds.add(schedule.rider_id);
+      selectedRidersByDayAndSlot.set(key, riderIds);
+    }
+
+    return weekDays.map((day) => ({
+      date: day.key,
+      shortDate: day.shortDate,
+      weekdayLabel: day.weekdayLabel,
+      slots: selectableSlots.map((slot) => {
+        const selectedCount = selectedRidersByDayAndSlot.get(`${day.key}:${slot.id}`)?.size ?? 0;
         const rateValue = weekRiders.length > 0 ? (selectedCount / weekRiders.length) * 100 : 0;
         const rate = rateValue.toFixed(1).replace(/\.0$/, "");
-        return { id: slot.id, name: slot.name, selectedCount, rate, rateValue };
-      })
-      .filter((slot) => slot.selectedCount > 0)
-      .sort((a, b) => b.rateValue - a.rateValue || a.name.localeCompare(b.name, "zh-CN"));
-  }, [schedules, selectableSlots, weekRiders]);
+        return { id: slot.id, name: slot.name, selectedCount, rate };
+      }),
+    }));
+  }, [schedules, selectableSlotIds, selectableSlots, weekDays, weekRiders]);
 
   const teamAutoFillCounts = useMemo(() => teams.map((team) => ({
     id: team.id,
@@ -313,6 +317,9 @@ export default function AdminPage() {
     }
     return counts;
   }, [groupFilter, limits, riderMap, schedules, teams, weekDays]);
+  const restRateRiderCount = groupFilter
+    ? weekRiders.filter((rider) => rider.team_id === groupFilter).length
+    : weekRiders.length;
 
   const requestSummaries = useMemo(() => {
     const schedulesByRider = new Map<string, RiderScheduleRow[]>();
@@ -1402,33 +1409,6 @@ export default function AdminPage() {
                     <strong>{configuredRestSlotCount}/{weekRiders.length}</strong>
                   </div>
                 </div>
-                {slotSelectionRates.length > 0 ? (
-                  <div
-                    className="overview-slot-rates"
-                    aria-label="查看已选时段占比明细"
-                  >
-                    <span className="overview-slot-rates-title">已选时段占比</span>
-                    <div className="overview-slot-rates-list">
-                      {slotSelectionRates.slice(0, 3).map((slot) => (
-                        <span className="overview-slot-rate" key={slot.id}>
-                          <strong>{slot.name}</strong> {slot.rate}%
-                        </span>
-                      ))}
-                    </div>
-                    <div className="overview-slot-rates-popover" role="tooltip">
-                      <strong className="overview-slot-rates-popover-title">已选时段明细</strong>
-                      <div className="overview-slot-rates-popover-list">
-                        {slotSelectionRates.map((slot) => (
-                          <div className="overview-slot-rates-popover-row" key={slot.id}>
-                            <span>{slot.name}</span>
-                            <span>{slot.selectedCount}/{weekRiders.length}</span>
-                            <strong>{slot.rate}%</strong>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
               </div>
             ) : <span className="overview-header-loading">加载中...</span>}
           </div>
@@ -1646,13 +1626,32 @@ export default function AdminPage() {
                       {weekDays.map((day) => {
                       const rc = restCounts[day.key] ?? { used: 0, limit: 0 };
                       const full = rc.used >= rc.limit;
+                      const staffingRate = restRateRiderCount > 0
+                        ? (((restRateRiderCount - rc.limit) / restRateRiderCount) * 100).toFixed(2)
+                        : "0.00";
+                      const dayRates = dailySlotSelectionRates.find((item) => item.date === day.key);
+                      const topSlots = dayRates
+                        ? [...dayRates.slots].sort((a, b) => b.selectedCount - a.selectedCount).slice(0, 2)
+                        : [];
                       return (
                         <th key={day.key} className="day-header">
-                          <span className="day-header-label">{day.weekdayLabel}</span>
-                          <span className="day-header-date">{day.shortDate}</span>
-                          <span className="day-header-rest">
-                            休息日：<strong className={full ? "rest-full" : ""}>{rc.used}/{rc.limit}</strong>
+                          <span className="day-header-date-line">
+                            <span className="day-header-label">{day.weekdayLabel}</span>
+                            <span className="day-header-date">{day.shortDate}</span>
                           </span>
+                          <span className="day-header-metrics">
+                            <span>排 {staffingRate}%</span>
+                            <span>休 <strong className={full ? "rest-full" : ""}>{rc.used}/{rc.limit}</strong></span>
+                          </span>
+                          {topSlots.length > 0 ? (
+                            <span className="day-header-slot-rates" aria-label="当日已选时段占比前两名">
+                              {topSlots.map((slot) => (
+                                <span key={slot.id} aria-label={`${slot.name} ${slot.rate}%`}>
+                                  {Array.from(slot.name.trim())[0] ?? "-"}{slot.rate}%
+                                </span>
+                              ))}
+                            </span>
+                          ) : null}
                         </th>
                       );
                     })}

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { buildDaysFromRange, formatWeekRange } from "@/lib/date";
-import { isAppleMobileBrowser, supabase } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase";
 import type { RiderRow, RiderScheduleRow, ScheduleWeekRow, TimeSlotRow } from "@/lib/types";
 
 const STORAGE_KEY = "offplan.employeeInfo";
@@ -256,42 +256,6 @@ export default function WeekSchedulePage() {
     }
     setSchedulesLoaded(true);
   }
-
-  useEffect(() => {
-    if (!week) return;
-    let active = true;
-    let pollTimer: number | null = null;
-    const startPolling = () => {
-      if (!active || pollTimer) return;
-      pollTimer = window.setInterval(() => { void refreshRiderSchedules(); }, 30_000);
-    };
-    const stopPolling = () => {
-      if (!pollTimer) return;
-      window.clearInterval(pollTimer);
-      pollTimer = null;
-    };
-    const channel = supabase
-      .channel(`employee-week-${week.id}-${rider?.rider_id ?? "anonymous"}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "rider_schedules", filter: `week_id=eq.${week.id}` }, () => {
-        void refreshRiderSchedules();
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "rest_day_limits", filter: `week_id=eq.${week.id}` }, () => {
-        void refreshRiderSchedules();
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "riders", filter: `week_id=eq.${week.id}` }, () => {
-        void refreshRiderSchedules();
-      })
-      .subscribe((status) => {
-        if (status === "SUBSCRIBED") stopPolling();
-        else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") startPolling();
-      });
-    if (isAppleMobileBrowser()) startPolling();
-    return () => {
-      active = false;
-      stopPolling();
-      void supabase.removeChannel(channel);
-    };
-  }, [week?.id, rider?.rider_id]);
 
   async function saveEmployeeName() {
     const trimmed = draftName.trim();
