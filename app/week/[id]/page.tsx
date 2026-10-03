@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { buildDaysFromRange, formatWeekRange } from "@/lib/date";
-import { supabase } from "@/lib/supabase";
+import { isAppleMobileBrowser, supabase } from "@/lib/supabase";
 import type { RiderRow, RiderScheduleRow, ScheduleWeekRow, TimeSlotRow } from "@/lib/types";
 
 const STORAGE_KEY = "offplan.employeeInfo";
@@ -244,6 +244,7 @@ export default function WeekSchedulePage() {
       supabase.from("rider_schedules").select("*").eq("week_id", week.id).eq("rider_id", rider.rider_id),
       supabase.from("riders").select("*").eq("week_id", week.id).eq("rider_id", rider.rider_id).maybeSingle(),
     ]);
+    if (schedulesRes.error || riderRes.error) return;
     const currentRider = riderRes.data as RiderRow | null;
     setSchedules((schedulesRes.data ?? []) as RiderScheduleRow[]);
     if (currentRider) {
@@ -258,6 +259,17 @@ export default function WeekSchedulePage() {
 
   useEffect(() => {
     if (!week) return;
+    let active = true;
+    let pollTimer: number | null = null;
+    const startPolling = () => {
+      if (!active || pollTimer) return;
+      pollTimer = window.setInterval(() => { void refreshRiderSchedules(); }, 30_000);
+    };
+    const stopPolling = () => {
+      if (!pollTimer) return;
+      window.clearInterval(pollTimer);
+      pollTimer = null;
+    };
     const channel = supabase
       .channel(`employee-week-${week.id}-${rider?.rider_id ?? "anonymous"}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "rider_schedules", filter: `week_id=eq.${week.id}` }, () => {
@@ -269,8 +281,16 @@ export default function WeekSchedulePage() {
       .on("postgres_changes", { event: "*", schema: "public", table: "riders", filter: `week_id=eq.${week.id}` }, () => {
         void refreshRiderSchedules();
       })
-      .subscribe();
-    return () => { void supabase.removeChannel(channel); };
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") stopPolling();
+        else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") startPolling();
+      });
+    if (isAppleMobileBrowser()) startPolling();
+    return () => {
+      active = false;
+      stopPolling();
+      void supabase.removeChannel(channel);
+    };
   }, [week?.id, rider?.rider_id]);
 
   async function saveEmployeeName() {
