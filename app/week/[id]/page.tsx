@@ -79,6 +79,7 @@ export default function WeekSchedulePage() {
 
   const [week, setWeek] = useState<ScheduleWeekRow | null>(null);
   const [weekLoading, setWeekLoading] = useState(true);
+  const [weekLoadHint, setWeekLoadHint] = useState<string | null>(null);
   const [rider, setRider] = useState<RiderRow | null>(null);
   const [draftName, setDraftName] = useState("");
   const [allSlots, setAllSlots] = useState<TimeSlotRow[]>([]);
@@ -118,20 +119,38 @@ export default function WeekSchedulePage() {
   useEffect(() => {
     async function loadWeek() {
       setWeekLoading(true);
-      const [weekRes, slotsRes] = await Promise.all([
-        supabase.from("schedule_weeks").select("*").eq("id", weekId).maybeSingle(),
-        supabase.from("time_slots").select("*").eq("week_id", weekId).order("sort_order"),
-      ]);
-      const weekData = weekRes.data ?? null;
-      if (weekData && !weekData.is_active) {
-        setMessage("该排休周尚未发布，请联系管理员");
+      setWeekLoadHint(null);
+      try {
+        const [weekRes, slotsRes] = await Promise.all([
+          supabase.from("schedule_weeks").select("*").eq("id", weekId).maybeSingle(),
+          supabase.from("time_slots").select("*").eq("week_id", weekId).order("sort_order"),
+        ]);
+        const requestError = weekRes.error ?? slotsRes.error;
+        if (requestError) {
+          setWeek(null);
+          setAllSlots([]);
+          setWeekLoadHint(`加载排班信息失败：${requestError.message}`);
+          return;
+        }
+
+        const weekData = weekRes.data ?? null;
+        if (weekData && !weekData.is_active) {
+          setMessage("该排休周尚未发布，请联系管理员");
+          setWeekLoadHint("该排班周尚未发布。");
+          setWeek(null);
+          setAllSlots([]);
+        } else {
+          setWeek(weekData);
+          setAllSlots(slotsRes.data ?? []);
+          if (!weekData) setWeekLoadHint("链接对应的排班周不存在或已被删除。");
+        }
+      } catch (error) {
         setWeek(null);
         setAllSlots([]);
-      } else {
-        setWeek(weekData);
-        setAllSlots(slotsRes.data ?? []);
+        setWeekLoadHint(`加载排班信息失败：${error instanceof Error ? error.message : String(error)}`);
+      } finally {
+        setWeekLoading(false);
       }
-      setWeekLoading(false);
     }
     void loadWeek();
   }, [weekId]);
@@ -398,7 +417,10 @@ export default function WeekSchedulePage() {
     return (
       <main className="page-container">
         <header className="page-header"><h1>排班系统</h1><p>该周不存在或尚未发布</p></header>
-        <div className="empty-state">请联系管理员获取新的排班链接。</div>
+        <div className="empty-state">
+          <span>请联系管理员获取新的排班链接。</span>
+          {weekLoadHint && <small className="schedule-link-hint">{weekLoadHint}</small>}
+        </div>
       </main>
     );
   }
