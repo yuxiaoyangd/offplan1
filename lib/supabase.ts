@@ -10,15 +10,8 @@ if (!supabaseUrl || !supabaseKey) {
 const supabaseOrigin = new URL(supabaseUrl).origin;
 const proxiedServicePath = /^\/(rest|auth|storage|functions)\/v1(?:\/|$)/;
 
-export function isAppleMobileBrowser() {
-  return typeof navigator !== "undefined" && (
-    /iPhone|iPad|iPod/.test(navigator.userAgent)
-    || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
-  );
-}
-
-const fetchWithAppleProxy: typeof fetch = (input, init) => {
-  if (!isAppleMobileBrowser() || typeof window === "undefined") return fetch(input, init);
+const fetchWithSameOriginProxy: typeof fetch = (input, init) => {
+  if (typeof window === "undefined") return fetch(input, init);
 
   let requestUrl: URL;
   try {
@@ -36,7 +29,7 @@ const fetchWithAppleProxy: typeof fetch = (input, init) => {
 };
 
 export const supabase = createClient(supabaseUrl, supabaseKey, {
-  global: { fetch: fetchWithAppleProxy },
+  global: { fetch: fetchWithSameOriginProxy },
   realtime: {
     params: {
       eventsPerSecond: 10,

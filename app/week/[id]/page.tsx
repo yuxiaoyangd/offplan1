@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { buildDaysFromRange, formatWeekRange } from "@/lib/date";
-import { isAppleMobileBrowser, supabase } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase";
 import type { RiderRow, RiderScheduleRow, ScheduleWeekRow, TimeSlotRow } from "@/lib/types";
 
 const STORAGE_KEY = "offplan.employeeInfo";
@@ -22,12 +22,11 @@ function isNetworkFailure(message: string, status?: number) {
 }
 
 function getWeekLoadCode(stage: "W" | "S" | "L", message: string, status?: number, serviceCode?: string) {
-  const path = isAppleMobileBrowser() ? "P" : "D";
   const reason = isNetworkFailure(message, status) ? "NET" : status && status > 0 ? `HTTP${status}` : "ERR";
   const detail = reason.startsWith("HTTP") && serviceCode && /^[a-z0-9]+$/i.test(serviceCode)
     ? `-${serviceCode.toUpperCase()}`
     : "";
-  return `E-${stage}-${reason}${detail}-${path}`;
+  return `E-${stage}-${reason}${detail}-P`;
 }
 
 function RongbaoAd() {
