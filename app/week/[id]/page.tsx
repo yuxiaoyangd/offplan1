@@ -421,7 +421,9 @@ export default function WeekSchedulePage() {
     return (
       <main className="page-container">
         <div className="empty-state" role="alert">
-          <code className="schedule-link-hint">{weekLoadCode ?? "E-L-ERR"}</code>
+          {weekLoadCode === "E-W-INACTIVE"
+            ? <span>排班周已关闭</span>
+            : <code className="schedule-link-hint">{weekLoadCode ?? "E-L-ERR"}</code>}
         </div>
       </main>
     );
