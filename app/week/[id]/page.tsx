@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { buildDaysFromRange, formatWeekRange } from "@/lib/date";
-import { supabase } from "@/lib/supabase";
+import { isAppleMobileBrowser, supabase } from "@/lib/supabase";
 import type { RiderRow, RiderScheduleRow, ScheduleWeekRow, TimeSlotRow } from "@/lib/types";
 
 const STORAGE_KEY = "offplan.employeeInfo";
@@ -16,6 +16,19 @@ type RpcResult = {
   success?: boolean;
   message?: string;
 };
+
+function isNetworkFailure(message: string, status?: number) {
+  return status === 0 || /failed to fetch|fetch failed|load failed|network ?error|network request failed/i.test(message);
+}
+
+function getWeekLoadCode(stage: "W" | "S" | "L", message: string, status?: number, serviceCode?: string) {
+  const path = isAppleMobileBrowser() ? "P" : "D";
+  const reason = isNetworkFailure(message, status) ? "NET" : status && status > 0 ? `HTTP${status}` : "ERR";
+  const detail = reason.startsWith("HTTP") && serviceCode && /^[a-z0-9]+$/i.test(serviceCode)
+    ? `-${serviceCode.toUpperCase()}`
+    : "";
+  return `E-${stage}-${reason}${detail}-${path}`;
+}
 
 function RongbaoAd() {
   return (
@@ -79,7 +92,7 @@ export default function WeekSchedulePage() {
 
   const [week, setWeek] = useState<ScheduleWeekRow | null>(null);
   const [weekLoading, setWeekLoading] = useState(true);
-  const [weekLoadHint, setWeekLoadHint] = useState<string | null>(null);
+  const [weekLoadCode, setWeekLoadCode] = useState<string | null>(null);
   const [rider, setRider] = useState<RiderRow | null>(null);
   const [draftName, setDraftName] = useState("");
   const [allSlots, setAllSlots] = useState<TimeSlotRow[]>([]);
@@ -119,35 +132,43 @@ export default function WeekSchedulePage() {
   useEffect(() => {
     async function loadWeek() {
       setWeekLoading(true);
-      setWeekLoadHint(null);
+      setWeekLoadCode(null);
       try {
         const [weekRes, slotsRes] = await Promise.all([
           supabase.from("schedule_weeks").select("*").eq("id", weekId).maybeSingle(),
           supabase.from("time_slots").select("*").eq("week_id", weekId).order("sort_order"),
         ]);
-        const requestError = weekRes.error ?? slotsRes.error;
-        if (requestError) {
+        const failures = [
+          weekRes.error ? { stage: "W" as const, error: weekRes.error, status: weekRes.status } : null,
+          slotsRes.error ? { stage: "S" as const, error: slotsRes.error, status: slotsRes.status } : null,
+        ].filter((failure) => failure !== null);
+        if (failures.length > 0) {
           setWeek(null);
           setAllSlots([]);
-          setWeekLoadHint(`加载排班信息失败：${requestError.message}`);
+          setWeekLoadCode(failures.map((failure) => getWeekLoadCode(
+            failure.stage,
+            failure.error.message,
+            failure.status,
+            failure.error.code,
+          )).join(" / "));
           return;
         }
 
         const weekData = weekRes.data ?? null;
         if (weekData && !weekData.is_active) {
-          setMessage("该排休周尚未发布，请联系管理员");
-          setWeekLoadHint("该排班周尚未发布。");
+          setWeekLoadCode("E-W-INACTIVE");
           setWeek(null);
           setAllSlots([]);
         } else {
           setWeek(weekData);
           setAllSlots(slotsRes.data ?? []);
-          if (!weekData) setWeekLoadHint("链接对应的排班周不存在或已被删除。");
+          if (!weekData) setWeekLoadCode("E-W-EMPTY");
         }
       } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
         setWeek(null);
         setAllSlots([]);
-        setWeekLoadHint(`加载排班信息失败：${error instanceof Error ? error.message : String(error)}`);
+        setWeekLoadCode(getWeekLoadCode("L", errorMessage));
       } finally {
         setWeekLoading(false);
       }
@@ -400,10 +421,8 @@ export default function WeekSchedulePage() {
   if (!week) {
     return (
       <main className="page-container">
-        <header className="page-header"><h1>排班系统</h1><p>该周不存在或尚未发布</p></header>
-        <div className="empty-state">
-          <span>请联系管理员获取新的排班链接。</span>
-          {weekLoadHint && <small className="schedule-link-hint">{weekLoadHint}</small>}
+        <div className="empty-state" role="alert">
+          <code className="schedule-link-hint">{weekLoadCode ?? "E-L-ERR"}</code>
         </div>
       </main>
     );
