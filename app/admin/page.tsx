@@ -245,6 +245,27 @@ export default function AdminPage() {
     [riderStatusMap, weekRiders],
   );
 
+  const pendingRestRiderCount = useMemo(
+    () => weekRiders.filter((rider) => rider.is_active && !riderStatusMap[rider.rider_id]?.hasRest).length,
+    [riderStatusMap, weekRiders],
+  );
+
+  const availableRestSlotCount = useMemo(() => {
+    const usedByTeamAndDay = new Map<string, number>();
+    for (const schedule of schedules) {
+      if (schedule.slot_id !== null) continue;
+      const teamId = riderMap[schedule.rider_id]?.team_id;
+      if (!teamId) continue;
+      const key = `${teamId}:${schedule.work_date}`;
+      usedByTeamAndDay.set(key, (usedByTeamAndDay.get(key) ?? 0) + 1);
+    }
+    return teams.reduce((total, team) => total + weekDays.reduce((teamTotal, day) => {
+      const key = `${team.id}:${day.key}`;
+      const limit = limits[key] ?? getDefaultLimit(day.key);
+      return teamTotal + Math.max(0, limit - (usedByTeamAndDay.get(key) ?? 0));
+    }, 0), 0);
+  }, [limits, riderMap, schedules, teams, weekDays]);
+
   const configuredRestSlotCount = useMemo(
     () => Object.values(limits).reduce((total, limit) => total + limit, 0),
     [limits],
@@ -1740,6 +1761,9 @@ export default function AdminPage() {
             </p>
             <p className="complete-confirm-copy">
               默认补全时段：{defaultAutoFillSlotNames.length > 0 ? defaultAutoFillSlotNames.join("、") : "未配置"}
+            </p>
+            <p className="complete-confirm-copy">
+              默认排休人数：{pendingRestRiderCount} 人 · 可排名额：{availableRestSlotCount} 人
             </p>
             <div className="complete-team-summary">
               <span className="team-autofill-title">自动补全</span>

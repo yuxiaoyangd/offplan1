@@ -57,6 +57,22 @@ export default function WeekEditPage() {
     return counts;
   }, [riderTeamMap, schedules]);
 
+  const pendingRandomRestCounts = useMemo(() => {
+    const restedRiderIds = new Set(
+      schedules.filter((schedule) => schedule.slot_id === null).map((schedule) => schedule.rider_id),
+    );
+    const counts = new Map<string, number>();
+    for (const rider of riders) {
+      if (rider.rest_preference_mode !== "random" || restedRiderIds.has(rider.rider_id)) continue;
+      counts.set(rider.team_id, (counts.get(rider.team_id) ?? 0) + 1);
+    }
+    return teams.map((team) => ({
+      id: team.id,
+      name: team.name,
+      count: counts.get(team.id) ?? 0,
+    }));
+  }, [riders, schedules, teams]);
+
   useEffect(() => {
     async function load() {
       setLoading(true);
@@ -113,6 +129,10 @@ export default function WeekEditPage() {
       .on("postgres_changes", { event: "*", schema: "public", table: "schedule_teams", filter: `week_id=eq.${weekId}` }, async () => {
         const { data } = await supabase.from("schedule_teams").select("*").eq("week_id", weekId).order("name");
         if (data) setTeams(data);
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "riders", filter: `week_id=eq.${weekId}` }, async () => {
+        const { data } = await supabase.from("riders").select("*").eq("week_id", weekId);
+        if (data) setRiders(data);
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "rider_schedules", filter: `week_id=eq.${weekId}` }, async () => {
         const { data } = await supabase.from("rider_schedules").select("*").eq("week_id", weekId).is("slot_id", null);
@@ -351,7 +371,14 @@ export default function WeekEditPage() {
           <div className="section-header">
             <div>
               <h2>小队排休名额</h2>
-              <p>{teams.length === 1 && teams[0].is_default ? "当前使用默认小队" : `已识别 ${teams.length} 个小队`}，名额按小队分别计算</p>
+              <p>
+                {teams.length === 1 && teams[0].is_default ? "当前使用默认小队" : `已识别 ${teams.length} 个小队`}，名额按小队分别计算；
+                已选随机排休人员：{pendingRandomRestCounts.map((team, index) => (
+                  <span key={team.id}>
+                    {index > 0 ? " · " : ""}<strong>{team.name} {team.count} 人</strong>
+                  </span>
+                ))} · 总计 <strong>{pendingRandomRestCounts.reduce((total, team) => total + team.count, 0)} 人</strong>
+              </p>
             </div>
           </div>
           <div className="quota-table-wrap">
