@@ -8,6 +8,7 @@ create extension if not exists pgcrypto;
 
 -- ==================== 2. 清空旧数据 ====================
 drop table if exists public.rider_feedback cascade;
+drop table if exists public.system_applications cascade;
 drop table if exists public.rest_week_members cascade;
 drop table if exists public.rest_periods cascade;
 drop table if exists public.employee_week_shifts cascade;
@@ -146,6 +147,28 @@ create table public.rider_feedback (
   created_at timestamptz not null default now()
 );
 
+-- 首页专属排休系统申请
+create table public.system_applications (
+  id uuid primary key default gen_random_uuid(),
+  company_size integer not null check (company_size between 1 and 1000000),
+  contact_name text not null check (char_length(trim(contact_name)) between 1 and 40),
+  contact_email text check (
+    contact_email is null or (
+      char_length(contact_email) between 3 and 254
+      and contact_email ~* '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$'
+    )
+  ),
+  contact_phone text check (
+    contact_phone is null or (
+      char_length(contact_phone) <= 30
+      and contact_phone ~ '^\+?[0-9() -]+$'
+      and char_length(regexp_replace(contact_phone, '[^0-9]', '', 'g')) between 7 and 15
+    )
+  ),
+  created_at timestamptz not null default now(),
+  constraint system_applications_one_contact check (num_nonnulls(contact_email, contact_phone) = 1)
+);
+
 -- ==================== 4. 索引 ====================
 
 -- 每个骑手每周最多一条排休记录
@@ -163,6 +186,7 @@ create index idx_rdl_week on public.rest_day_limits (week_id, team_id);
 create index idx_sw_active on public.schedule_weeks (is_active, start_date desc);
 create index idx_rider_feedback_created_at on public.rider_feedback (created_at desc);
 create index idx_rider_feedback_city on public.rider_feedback (city);
+create index idx_system_applications_created_at on public.system_applications (created_at desc);
 
 -- ==================== 5. 函数 ====================
 
@@ -774,6 +798,80 @@ begin
 end;
 $$;
 
+-- 管理员一次保存时段可选状态、必选数量和默认时段
+create or replace function public.save_week_slot_rules(
+  p_week_id uuid,
+  p_required_slots int,
+  p_default_slot_ids uuid[],
+  p_slot_ids uuid[],
+  p_selectable_flags boolean[]
+)
+returns jsonb language plpgsql
+as $$
+declare
+  v_slot_count int;
+  v_requested_count int;
+  v_default_count int;
+begin
+  perform 1 from public.schedule_weeks where id = p_week_id for update;
+  if not found then
+    return jsonb_build_object('success', false, 'message', '排班周不存在');
+  end if;
+
+  if p_required_slots is null or p_required_slots < 0 or p_required_slots > 10 then
+    return jsonb_build_object('success', false, 'message', '必选时段数需在 0 到 10 之间');
+  end if;
+
+  if p_slot_ids is null or p_selectable_flags is null then
+    return jsonb_build_object('success', false, 'message', '时段数据不完整');
+  end if;
+  v_requested_count := coalesce(array_length(p_slot_ids, 1), 0);
+  if v_requested_count <> coalesce(array_length(p_selectable_flags, 1), 0)
+    or array_position(p_slot_ids, null) is not null
+    or array_position(p_selectable_flags, null) is not null then
+    return jsonb_build_object('success', false, 'message', '时段数据不完整');
+  end if;
+
+  select count(*) into v_slot_count from public.time_slots where week_id = p_week_id;
+  if v_slot_count <> v_requested_count
+    or (select count(distinct slot_id) from unnest(p_slot_ids) as requested(slot_id)) <> v_requested_count
+    or exists (
+      select 1
+      from unnest(p_slot_ids) as requested(slot_id)
+      left join public.time_slots ts on ts.id = requested.slot_id and ts.week_id = p_week_id
+      where ts.id is null
+    ) then
+    return jsonb_build_object('success', false, 'message', '时段配置已变化，请刷新后重试');
+  end if;
+
+  v_default_count := coalesce(array_length(p_default_slot_ids, 1), 0);
+  if v_default_count > p_required_slots
+    or (select count(distinct slot_id) from unnest(coalesce(p_default_slot_ids, array[]::uuid[])) as defaults(slot_id)) <> v_default_count
+    or exists (
+      select 1
+      from unnest(coalesce(p_default_slot_ids, array[]::uuid[])) as defaults(slot_id)
+      left join unnest(p_slot_ids, p_selectable_flags) as desired(slot_id, is_selectable)
+        on desired.slot_id = defaults.slot_id
+      where desired.slot_id is null or desired.is_selectable is not true
+    ) then
+    return jsonb_build_object('success', false, 'message', '默认时段必须是本周已开启的可选时段，且数量不能超过必选数量');
+  end if;
+
+  update public.time_slots ts
+  set is_selectable = desired.is_selectable
+  from unnest(p_slot_ids, p_selectable_flags) as desired(slot_id, is_selectable)
+  where ts.id = desired.slot_id and ts.week_id = p_week_id
+    and ts.is_selectable is distinct from desired.is_selectable;
+
+  update public.schedule_weeks
+  set required_slots = p_required_slots,
+      default_slot_ids = coalesce(p_default_slot_ids, array[]::uuid[])
+  where id = p_week_id;
+
+  return jsonb_build_object('success', true);
+end;
+$$;
+
 -- 骑手切换时段（单时段模式：原子性地取消旧的并选择新的）
 create or replace function public.switch_rider_slot(
   p_rider_id text,
@@ -1120,7 +1218,7 @@ begin
     v_rest_assigned := v_rest_assigned + 1;
   end loop;
 
-  -- 再补时段：保留已有选择，只从默认时段中补到每天规定数量。
+  -- 再补时段：管理端套用的有效时段也算已有出勤，只从默认时段中补足缺额。
   for v_rider in
     select r.rider_id
     from public.riders r
@@ -1150,8 +1248,7 @@ begin
         and rs.slot_id is not null
         and rs.is_selected is true
         and ts.week_id = p_week_id
-        and ts.is_active
-        and ts.is_selectable;
+        and ts.is_active;
 
       if v_selected_count < v_required_slots then
         v_days_filled := v_days_filled + 1;
@@ -1228,11 +1325,10 @@ begin
   from public.time_slots ts
   where ts.week_id = p_week_id
     and ts.is_active
-    and ts.is_selectable
     and ts.id = any(p_slot_ids);
 
   if v_valid_slot_count <> array_length(p_slot_ids, 1) then
-    return jsonb_build_object('success', false, 'message', '出勤时段无效、不可选或存在重复');
+    return jsonb_build_object('success', false, 'message', '出勤时段无效、已停用或存在重复');
   end if;
 
   for v_rider in select unnest(p_rider_ids)
@@ -1269,7 +1365,7 @@ begin
 end;
 $$;
 
--- 批量清空骑手当周排班
+-- 批量清空骑手当周排班，并允许骑手重新提交排休意愿
 create or replace function public.bulk_clear_rider_schedules(
   p_week_id uuid,
   p_rider_ids text[]
@@ -1282,6 +1378,12 @@ begin
   if p_rider_ids is null or array_length(p_rider_ids, 1) is null then
     return jsonb_build_object('success', false, 'message', '未提供骑手名单');
   end if;
+
+  update public.riders
+  set rest_preference_mode = null,
+      preference_submitted_at = null
+  where week_id = p_week_id
+    and rider_id = any(p_rider_ids);
 
   delete from public.rider_schedules
   where week_id = p_week_id
@@ -1753,6 +1855,7 @@ alter table public.rest_day_limits enable row level security;
 alter table public.rider_schedules enable row level security;
 alter table public.week_import_snapshots enable row level security;
 alter table public.rider_feedback enable row level security;
+alter table public.system_applications enable row level security;
 
 create policy "public read" on public.schedule_weeks for select to anon, authenticated using (true);
 create policy "public write" on public.schedule_weeks for all to anon, authenticated using (true) with check (true);
@@ -1769,6 +1872,7 @@ create policy "public write" on public.rider_schedules for all to anon, authenti
 create policy "public read" on public.week_import_snapshots for select to anon, authenticated using (true);
 create policy "public write" on public.week_import_snapshots for all to anon, authenticated using (true) with check (true);
 create policy "rider feedback insert" on public.rider_feedback for insert to anon, authenticated with check (true);
+create policy "system applications insert" on public.system_applications for insert to anon, authenticated with check (true);
 
 -- ==================== 8. 权限 ====================
 
@@ -1781,6 +1885,7 @@ grant all on public.rest_day_limits to anon, authenticated;
 grant all on public.rider_schedules to anon, authenticated;
 grant all on public.week_import_snapshots to anon, authenticated;
 grant insert on public.rider_feedback to anon, authenticated;
+grant insert on public.system_applications to anon, authenticated;
 
 grant execute on function public.import_xls_week to anon, authenticated;
 grant execute on function public.ensure_default_team to anon, authenticated;
@@ -1791,6 +1896,7 @@ grant execute on function public.get_week_slots to anon, authenticated;
 grant execute on function public.toggle_slot_selectable to anon, authenticated;
 grant execute on function public.set_week_required_slots to anon, authenticated;
 grant execute on function public.set_week_default_slots to anon, authenticated;
+grant execute on function public.save_week_slot_rules to anon, authenticated;
 grant execute on function public.bulk_set_rider_rest to anon, authenticated;
 grant execute on function public.bulk_clear_rider_rest to anon, authenticated;
 

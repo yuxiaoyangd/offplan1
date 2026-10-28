@@ -1,0 +1,215 @@
+.showcase {
+  position: relative;
+  margin: 0;
+  color: #172425;
+}
+
+.stage {
+  overflow: hidden;
+  border: 1px solid #dedfd6;
+  border-radius: 20px;
+  background: #f4f3ed;
+  box-shadow: 0 16px 42px -25px rgba(23, 36, 37, .22);
+}
+
+.tab:focus-visible { outline: 2px solid #aa6a09; outline-offset: -5px; }
+.panel:focus-visible { outline: 2px solid #aa6a09; outline-offset: -5px; }
+.panel[hidden] { display: none; }
+
+.sceneLayout {
+  display: grid;
+  grid-template-columns: minmax(0, .72fr) minmax(0, 1.7fr);
+  align-items: center;
+  gap: 24px;
+  min-height: 350px;
+  padding: 28px 30px 22px 36px;
+}
+
+.copy { animation: copyIn .45s ease-out both; }
+.copy h2 { margin: 0 0 15px; font-size: clamp(22px, 2.7vw, 30px); font-weight: 700; line-height: 1.4; letter-spacing: -.05em; }
+.copy p { max-width: 235px; margin: 0; color: #66735f; font-size: 13px; line-height: 1.95; text-wrap: pretty; }
+.copyLine { display: block; width: 47px; height: 4px; margin-top: 23px; border-radius: 4px; background: #ffb331; transform: rotate(-3deg); }
+.illustration { display: block; width: 100%; height: auto; overflow: visible; font-family: inherit; }
+.svgLabel { fill: #172425; font-size: 19px; font-weight: 650; }
+.svgSmall { fill: #172425; font-size: 16px; font-weight: 500; }
+.svgTiny { fill: #59664f; font-size: 12px; font-weight: 500; }
+.svgMicro { fill: #172425; font-size: 10px; font-weight: 600; }
+
+.tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+.tab {
+  position: relative;
+  min-width: 0;
+  min-height: 54px;
+  padding: 16px 9px;
+  overflow: hidden;
+  border: 1px solid #dedfd6;
+  border-radius: 12px;
+  background: #f8f7f3;
+  color: #72806b;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color .2s, background .2s;
+}
+.tab:hover { background: #efefe5; color: #172425; }
+.tab[aria-selected="true"] { border-color: #b9c795; color: #172425; font-weight: 650; }
+.progressFill { position: absolute; inset: 0; background: #e5efce; transform: scaleX(0); transform-origin: left center; pointer-events: none; }
+.tabLabel { position: relative; z-index: 1; }
+
+.countBadge { transform-origin: 180px 40px; animation: badgeIn var(--scene-duration) ease-out both; }
+.nameFlight { opacity: 0; animation: gatherNames var(--scene-duration) cubic-bezier(.4, 0, .2, 1) both; animation-delay: calc(var(--row) * 85ms); }
+.importedRow { animation: revealRow var(--scene-duration) ease-out both; animation-delay: calc(var(--row) * 85ms); }
+.importButton { transform-origin: 283px 181px; animation: importPress var(--scene-duration) ease-out both; }
+.importSuccess { transform-origin: 499px 305px; animation: importSuccess var(--scene-duration) ease-out both; }
+.importPointer { opacity: 0; animation: importPointer var(--scene-duration) ease-in-out both; }
+.person { animation: personIn var(--scene-duration) ease-out both; }
+.linkCard { transform-origin: 131px 78px; animation: linkIn var(--scene-duration) ease-out both; }
+.dayChoice { animation: chooseDay var(--scene-duration) ease-out both; animation-delay: calc(var(--day) * 90ms); }
+.timeChoice { animation: chooseTime var(--scene-duration) ease-out both; }
+.choiceSaved { transform-origin: 376px 311px; animation: choiceSaved var(--scene-duration) ease-out both; }
+.syncCard { animation: syncIn var(--scene-duration) ease-out both; }
+.choosePointer { opacity: 0; animation: choosePointer var(--scene-duration) ease-in-out both; }
+.exportButton { transform-origin: 281px 83px; animation: exportPress var(--scene-duration) ease-out both; }
+.exportTrail { animation: trailIn var(--scene-duration) ease-out both; }
+.exportSheet { transform-origin: 526px 188px; filter: drop-shadow(0 7px 5px #1724250a); animation: unfoldSheet var(--scene-duration) cubic-bezier(.22, 1, .36, 1) both; }
+.sheetReady { transform-origin: 601px 303px; animation: sheetReady var(--scene-duration) ease-out both; }
+.exportDone { animation: exportDone var(--scene-duration) ease-out both; }
+.exportPointer { opacity: 0; animation: exportPointer var(--scene-duration) ease-in-out both; }
+
+.showcase[data-scene-paused="true"] .illustration *,
+.showcase[data-scene-paused="true"] .copy { animation-play-state: paused; }
+
+@keyframes copyIn {
+  from { opacity: 0; transform: translateY(7px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes badgeIn {
+  0% { opacity: 0; transform: scale(.8) rotate(-7deg); }
+  12%, 100% { opacity: 1; transform: scale(1) rotate(0); }
+}
+@keyframes gatherNames {
+  0%, 24% { opacity: 1; transform: translate(0, 0) rotate(var(--tilt)); }
+  35% { opacity: 1; transform: translate(10px, -6px) rotate(0); }
+  53% { opacity: 1; transform: translate(var(--fly-x), var(--fly-y)) rotate(0) scale(.9); }
+  59%, 100% { opacity: 0; transform: translate(var(--fly-x), var(--fly-y)) rotate(0) scale(.85); }
+}
+@keyframes revealRow {
+  0%, 48% { opacity: 0; transform: translateX(-7px); }
+  61%, 100% { opacity: 1; transform: translateX(0); }
+}
+@keyframes importPress {
+  0%, 24% { transform: scale(1); }
+  28% { transform: scale(.88); }
+  33%, 100% { transform: scale(1); }
+}
+@keyframes importSuccess {
+  0%, 65% { opacity: 0; transform: translateY(8px) scale(.92); }
+  75% { opacity: 1; transform: translateY(0) scale(1.04); }
+  80%, 100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes importPointer {
+  0%, 9% { opacity: 0; transform: translate(232px, 263px); }
+  15% { opacity: 1; transform: translate(232px, 263px); }
+  24% { opacity: 1; transform: translate(283px, 181px) scale(1); }
+  28% { opacity: 1; transform: translate(283px, 181px) scale(.86); }
+  33% { opacity: 1; transform: translate(283px, 181px) scale(1); }
+  42%, 100% { opacity: 0; transform: translate(297px, 211px); }
+}
+@keyframes personIn {
+  0% { opacity: 0; transform: translateY(10px); }
+  10%, 100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes linkIn {
+  0% { opacity: 0; transform: scale(.9) rotate(-4deg); }
+  11% { opacity: 1; transform: scale(1.03) rotate(1deg); }
+  16%, 100% { opacity: 1; transform: scale(1) rotate(0); }
+}
+@keyframes chooseDay {
+  0%, 28% { opacity: 0; }
+  38%, 100% { opacity: 1; }
+}
+@keyframes chooseTime {
+  0%, 52% { opacity: 0; }
+  58%, 100% { opacity: 1; }
+}
+@keyframes choiceSaved {
+  0%, 64% { opacity: 0; transform: translateY(6px) scale(.95); }
+  73%, 100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes syncIn {
+  0%, 64% { opacity: 0; transform: translateX(-12px); }
+  78%, 100% { opacity: 1; transform: translateX(0); }
+}
+@keyframes choosePointer {
+  0%, 10% { opacity: 0; transform: translate(209px, 108px); }
+  17% { opacity: 1; transform: translate(218px, 82px); }
+  26% { opacity: 1; transform: translate(341px, 146px) scale(1); }
+  30% { opacity: 1; transform: translate(341px, 146px) scale(.86); }
+  33% { opacity: 1; transform: translate(341px, 146px) scale(1); }
+  41% { opacity: 1; transform: translate(407px, 192px) scale(1); }
+  44% { opacity: 1; transform: translate(407px, 192px) scale(.86); }
+  47% { opacity: 1; transform: translate(407px, 192px) scale(1); }
+  52% { opacity: 1; transform: translate(395px, 265px) scale(1); }
+  55% { opacity: 1; transform: translate(395px, 265px) scale(.86); }
+  58% { opacity: 1; transform: translate(395px, 265px) scale(1); }
+  67%, 100% { opacity: 0; transform: translate(413px, 291px); }
+}
+@keyframes exportPress {
+  0%, 23% { transform: scale(1); }
+  27% { transform: scale(.91); }
+  32%, 100% { transform: scale(1); }
+}
+@keyframes trailIn {
+  0%, 28% { opacity: 0; stroke-dasharray: 0 100; }
+  41%, 100% { opacity: 1; stroke-dasharray: 100 0; }
+}
+@keyframes unfoldSheet {
+  0%, 29% { opacity: 0; transform: translate(-94px, 12px) scale(.65) rotate(-6deg); }
+  43%, 51% { opacity: 1; transform: translate(0, 0) scale(.82) rotate(2deg); }
+  68%, 100% { opacity: 1; transform: translate(0, 0) scale(1) rotate(0); }
+}
+@keyframes sheetReady {
+  0%, 68% { opacity: 0; transform: scale(.7); }
+  77% { opacity: 1; transform: scale(1.08); }
+  82%, 100% { opacity: 1; transform: scale(1); }
+}
+@keyframes exportDone {
+  0%, 72% { opacity: 0; transform: translateY(6px); }
+  82%, 100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes exportPointer {
+  0%, 9% { opacity: 0; transform: translate(228px, 159px); }
+  16% { opacity: 1; transform: translate(228px, 159px); }
+  23% { opacity: 1; transform: translate(286px, 84px) scale(1); }
+  27% { opacity: 1; transform: translate(286px, 84px) scale(.86); }
+  32% { opacity: 1; transform: translate(286px, 84px) scale(1); }
+  49% { opacity: 1; transform: translate(529px, 260px) scale(1); }
+  53% { opacity: 1; transform: translate(529px, 260px) scale(.86); }
+  57% { opacity: 1; transform: translate(529px, 260px) scale(1); }
+  68%, 100% { opacity: 0; transform: translate(551px, 288px); }
+}
+
+@media (max-width: 860px) {
+  .sceneLayout { grid-template-columns: minmax(0, .7fr) minmax(0, 1.6fr); min-height: 300px; gap: 16px; padding: 28px 20px 23px 27px; }
+  .copy h2 { font-size: 23px; }
+  .copy p { font-size: 12px; }
+}
+
+@media (max-width: 600px) {
+  .showcase { margin: 23px 0 27px; }
+  .stage { border-radius: 16px; }
+  .sceneLayout { grid-template-columns: 1fr; gap: 12px; min-height: 0; padding: 24px 14px 16px; }
+  .copy { padding: 0 7px; }
+  .copy h2 { margin-bottom: 7px; font-size: 23px; }
+  .copy p { max-width: 100%; min-height: 46px; font-size: 12px; line-height: 1.9; }
+  .copyLine { display: none; }
+  .tabs { gap: 6px; margin-bottom: 9px; }
+  .tab { min-height: 48px; padding: 14px 3px; border-radius: 9px; font-size: 11px; white-space: nowrap; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .showcase .illustration *, .showcase .copy { animation: none; }
+  .tab { transition: none; }
+  .progressFill { display: none; }
+  .tab[aria-selected="true"] { background: #e5efce; }
+}

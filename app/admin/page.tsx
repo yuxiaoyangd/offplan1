@@ -188,8 +188,13 @@ export default function AdminPage() {
     return map;
   }, [slots]);
 
-  const selectableSlotIds = useMemo(() => new Set(slots.filter((s) => s.is_selectable).map((s) => s.id)), [slots]);
   const selectableSlots = useMemo(() => slots.filter((s) => s.is_selectable).sort((a, b) => a.sort_order - b.sort_order), [slots]);
+  const applicableSlots = useMemo(() => slots.filter((s) => s.is_active).sort((a, b) => a.sort_order - b.sort_order), [slots]);
+  const activeSlotIds = useMemo(() => new Set(applicableSlots.map((slot) => slot.id)), [applicableSlots]);
+  const selectableActiveSlotIds = useMemo(
+    () => new Set(selectableSlots.filter((slot) => slot.is_active).map((slot) => slot.id)),
+    [selectableSlots],
+  );
 
   const namesWithShifts = useMemo(() => new Set(schedules.map((s) => s.rider_id)), [schedules]);
 
@@ -218,7 +223,7 @@ export default function AdminPage() {
         const restEntry = entries.find((item) => item.slot_id === null);
         if (restEntry) hasRest = true;
         const selectedCount = entries.filter(
-          (item) => item.slot_id !== null && item.is_selected && selectableSlotIds.has(item.slot_id),
+          (item) => item.slot_id !== null && item.is_selected && activeSlotIds.has(item.slot_id),
         ).length;
         totalSelected += selectedCount;
         if (!restEntry && selectedCount < (activeWeek?.required_slots ?? 0)) {
@@ -234,7 +239,7 @@ export default function AdminPage() {
       };
     }
     return result;
-  }, [activeWeek?.required_slots, scheduleByRider, selectableSlotIds, weekDays, weekRiders]);
+  }, [activeWeek?.required_slots, scheduleByRider, activeSlotIds, weekDays, weekRiders]);
 
   const groups = useMemo(() => {
     return teams.map((team) => ({ id: team.id, name: team.name }));
@@ -277,7 +282,7 @@ export default function AdminPage() {
     const selectedRidersByDayAndSlot = new Map<string, Set<string>>();
     for (const schedule of schedules) {
       if (!schedule.slot_id || !schedule.is_selected || !validDayKeys.has(schedule.work_date)
-        || !selectableSlotIds.has(schedule.slot_id) || !validRiderIds.has(schedule.rider_id)) continue;
+        || !activeSlotIds.has(schedule.slot_id) || !validRiderIds.has(schedule.rider_id)) continue;
       const key = `${schedule.work_date}:${schedule.slot_id}`;
       const riderIds = selectedRidersByDayAndSlot.get(key) ?? new Set<string>();
       riderIds.add(schedule.rider_id);
@@ -288,14 +293,34 @@ export default function AdminPage() {
       date: day.key,
       shortDate: day.shortDate,
       weekdayLabel: day.weekdayLabel,
-      slots: selectableSlots.map((slot) => {
+      slots: applicableSlots.map((slot) => {
         const selectedCount = selectedRidersByDayAndSlot.get(`${day.key}:${slot.id}`)?.size ?? 0;
         const rateValue = weekRiders.length > 0 ? (selectedCount / weekRiders.length) * 100 : 0;
         const rate = rateValue.toFixed(1).replace(/\.0$/, "");
         return { id: slot.id, name: slot.name, selectedCount, rate };
       }),
     }));
-  }, [schedules, selectableSlotIds, selectableSlots, weekDays, weekRiders]);
+  }, [schedules, activeSlotIds, applicableSlots, weekDays, weekRiders]);
+
+  const autoFillMissingRiderIds = useMemo(() => {
+    const result = new Set<string>();
+    const requiredSlots = activeWeek?.required_slots ?? 0;
+    for (const rider of weekRiders) {
+      const riderDayMap = scheduleByRider.get(rider.rider_id);
+      for (const day of weekDays) {
+        const entries = riderDayMap?.get(day.key) ?? [];
+        if (entries.some((entry) => entry.slot_id === null)) continue;
+        const selectedCount = entries.filter((entry) =>
+          entry.slot_id !== null && entry.is_selected && activeSlotIds.has(entry.slot_id),
+        ).length;
+        if (selectedCount < requiredSlots) {
+          result.add(rider.rider_id);
+          break;
+        }
+      }
+    }
+    return result;
+  }, [activeWeek?.required_slots, scheduleByRider, activeSlotIds, weekDays, weekRiders]);
 
   const teamAutoFillCounts = useMemo(() => teams.map((team) => ({
     id: team.id,
@@ -303,16 +328,16 @@ export default function AdminPage() {
     riderCount: weekRiders.filter((rider) => {
       if (rider.team_id !== team.id) return false;
       const status = riderStatusMap[rider.rider_id];
-      return !status || !status.hasRest || status.missingDays > 0;
+      return !status || !status.hasRest || autoFillMissingRiderIds.has(rider.rider_id);
     }).length,
-  })), [riderStatusMap, teams, weekRiders]);
+  })), [autoFillMissingRiderIds, riderStatusMap, teams, weekRiders]);
 
   const defaultAutoFillSlotNames = useMemo(() => {
     if (!activeWeek) return [];
     const defaultSlotIds = new Set(activeWeek.default_slot_ids ?? []);
     const requiredSlots = activeWeek.required_slots ?? 0;
     return selectableSlots
-      .filter((slot) => defaultSlotIds.has(slot.id))
+      .filter((slot) => slot.is_active && defaultSlotIds.has(slot.id))
       .slice(0, requiredSlots)
       .map((slot) => slot.name);
   }, [activeWeek, selectableSlots]);
@@ -483,6 +508,25 @@ export default function AdminPage() {
     setShowAdvancedTools(false);
   }, [activeWeek?.id]);
 
+  const refreshOverviewAfterWrite = useCallback(async (weekId: string) => {
+    const [latestSchedules, ridersRes, limitsRes] = await Promise.all([
+      fetchAllWeekSchedules(weekId),
+      supabase.from("riders").select("*").eq("week_id", weekId),
+      supabase.from("rest_day_limits").select("team_id,rest_date,max_slots").eq("week_id", weekId),
+    ]);
+    if (ridersRes.error || limitsRes.error) throw ridersRes.error ?? limitsRes.error;
+    if (activeWeekIdRef.current !== weekId) return;
+    setSchedules(latestSchedules);
+    setRiderMap((ridersRes.data ?? []).reduce<Record<string, RiderRow>>((acc, rider) => {
+      acc[rider.rider_id] = rider;
+      return acc;
+    }, {}));
+    setLimits((limitsRes.data ?? []).reduce<Record<string, number>>((acc, row) => {
+      acc[`${row.team_id}:${row.rest_date}`] = row.max_slots;
+      return acc;
+    }, {}));
+  }, []);
+
   const handleBulkAction = useCallback(async (action: BulkActionType) => {
     if (!activeWeek) return;
     const riderIds = Array.from(selectedRiderIds);
@@ -550,16 +594,13 @@ export default function AdminPage() {
         });
         if (error) throw error;
         if (data?.removed !== undefined) {
-          responseMessage = `已清空排班 ${data.removed} 条`;
+          responseMessage = `已清空排班 ${data.removed} 条，骑手可重新选择`;
         }
       }
-      if (action === "apply-slot") {
-        try {
-          const latestSchedules = await fetchAllWeekSchedules(activeWeek.id);
-          if (activeWeekIdRef.current === activeWeek.id) setSchedules(latestSchedules);
-        } catch {
-          responseMessage += "，但页面刷新失败，请手动刷新查看最新状态";
-        }
+      try {
+        await refreshOverviewAfterWrite(activeWeek.id);
+      } catch (err: unknown) {
+        responseMessage += `，但页面刷新失败：${err instanceof Error ? err.message : "未知错误"}`;
       }
       setMessage(responseMessage);
       resetSelection();
@@ -570,7 +611,7 @@ export default function AdminPage() {
       setPendingAction(null);
       setBulkRestDate("");
     }
-  }, [activeWeek, bulkRestDate, resetSelection, selectedRiderIds, applySlotIds, slotMap]);
+  }, [activeWeek, bulkRestDate, resetSelection, selectedRiderIds, applySlotIds, slotMap, refreshOverviewAfterWrite]);
 
   function requestClearSchedules() {
     if (selectedRiderIds.size === 0) {
@@ -593,14 +634,13 @@ export default function AdminPage() {
     }
     const hasMissingSchedules = weekRiders.some((rider) => {
       const status = riderStatusMap[rider.rider_id];
-      return !status || !status.hasRest || status.missingDays > 0;
+      return !status || !status.hasRest || autoFillMissingRiderIds.has(rider.rider_id);
     });
     if (!hasMissingSchedules) {
       setMessage("当前排班已完成，没有缺失了");
       return;
     }
-    const validSlotIds = new Set(selectableSlots.map((slot) => slot.id));
-    const validDefaults = (activeWeek.default_slot_ids ?? []).filter((slotId) => validSlotIds.has(slotId));
+    const validDefaults = (activeWeek.default_slot_ids ?? []).filter((slotId) => selectableActiveSlotIds.has(slotId));
     if ((activeWeek.required_slots ?? 0) > validDefaults.length) {
       setMessage("默认时段不足，请先到“编辑配置”中设置足够的默认时段");
       return;
@@ -624,8 +664,7 @@ export default function AdminPage() {
     }
 
     try {
-      const latestSchedules = await fetchAllWeekSchedules(activeWeek.id);
-      if (activeWeekIdRef.current === activeWeek.id) setSchedules(latestSchedules);
+      await refreshOverviewAfterWrite(activeWeek.id);
     } catch (err: unknown) {
       setMessage(`排班已补全，但总览刷新失败：${err instanceof Error ? err.message : "未知错误"}`);
       return;
@@ -1007,7 +1046,12 @@ export default function AdminPage() {
         const { data } = await supabase.from("time_slots").select("*").eq("week_id", activeWeek.id).order("sort_order");
         if (data && activeWeekIdRef.current === activeWeek.id) setSlots(data);
       })
-      .on("postgres_changes", { event: "*", schema: "public", table: "rider_schedules", filter: activeWeek ? `week_id=eq.${activeWeek.id}` : undefined }, refreshWeekSchedules)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "rider_schedules", filter: activeWeek ? `week_id=eq.${activeWeek.id}` : undefined }, refreshWeekSchedules)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "rider_schedules", filter: activeWeek ? `week_id=eq.${activeWeek.id}` : undefined }, refreshWeekSchedules)
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "rider_schedules" }, (payload) => {
+        const deletedWeekId = (payload.old as { week_id?: string }).week_id;
+        if (!deletedWeekId || deletedWeekId === activeWeek?.id) refreshWeekSchedules();
+      })
       .on("postgres_changes", { event: "*", schema: "public", table: "rest_day_limits", filter: activeWeek ? `week_id=eq.${activeWeek.id}` : undefined }, async () => {
         if (!activeWeek) return;
         const { data } = await supabase.from("rest_day_limits").select("team_id,rest_date,max_slots").eq("week_id", activeWeek.id);
@@ -1530,14 +1574,14 @@ export default function AdminPage() {
                   <div className="bulk-action-card">
                     <div>
                       <h4>套用指定时段</h4>
-                      <p>选择单个时段套用到选中骑手的非排休日</p>
+                      <p>虚线边框为未开启时段，骑手端不可选，管理端可以套用。</p>
                     </div>
-                    {selectableSlots.length > 0 && (
+                    {applicableSlots.length > 0 && (
                       <div className="inline-input inline-input-chips">
-                        {selectableSlots.map((slot) => (
+                        {applicableSlots.map((slot) => (
                           <button
                             key={slot.id}
-                            className={`chip ${applySlotIds.includes(slot.id) ? "chip-active" : ""}`}
+                            className={`chip ${applySlotIds.includes(slot.id) ? "chip-active" : ""} ${!slot.is_selectable ? "chip-unselectable" : ""}`}
                             type="button"
                             onClick={() => setApplySlotIds((current) => current.includes(slot.id)
                               ? current.filter((id) => id !== slot.id)
@@ -1607,10 +1651,10 @@ export default function AdminPage() {
                   <div className="bulk-action-card">
                     <div>
                       <h4>清空排班</h4>
-                      <p>移除选中骑手本周所有排班记录</p>
+                      <p>移除选中骑手本周所有排班记录，并重置提交状态</p>
                     </div>
                     <footer>
-                      <div className="bulk-meta">支持重新分配</div>
+                      <div className="bulk-meta">骑手可重新选择</div>
                       <button
                         className="btn-secondary btn-sm"
                         type="button"
@@ -1793,7 +1837,7 @@ export default function AdminPage() {
           <div className="confirm-card" onClick={(event) => event.stopPropagation()}>
             <h2>确认清空排班</h2>
             <p className="complete-confirm-copy">
-              确定清空已选 {selectedRiderIds.size} 位骑手的本周排班吗？排休和出勤时段都将被删除，且无法撤销。
+              确定清空已选 {selectedRiderIds.size} 位骑手的本周排班吗？排休和出勤时段都将被删除，提交状态将重置，骑手可以重新选择。此操作无法撤销。
             </p>
             <div className="card-actions-row">
               <button

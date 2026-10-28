@@ -519,6 +519,10 @@ select:focus-visible,
   color: var(--accent-hover);
 }
 
+.chip-unselectable {
+  border-style: dashed;
+}
+
 .bulk-actions-grid {
   display: grid;
   gap: 12px;
@@ -1544,21 +1548,27 @@ select:focus-visible,
   cursor: not-allowed;
 }
 
-.config-section-actions {
-  margin-top: 16px;
-  padding-top: 14px;
-  display: flex;
-  justify-content: center;
-  border-top: 1px solid var(--border-color);
-}
-
-.config-section-actions .btn-primary,
-.config-section-actions .btn-secondary {
+.config-save-button {
   width: auto;
   min-width: 128px;
   padding: 10px 16px;
   border-radius: var(--radius-sm);
   white-space: nowrap;
+  margin-left: auto;
+}
+
+.config-save-button:disabled {
+  background: var(--border-strong);
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+.config-save-button.config-save-idle,
+.config-save-button.config-save-idle:not(:disabled):hover {
+  background: var(--border-strong);
+  color: var(--text-muted);
+  box-shadow: none;
+  transform: none;
 }
 
 @media (max-width: 900px) {
@@ -2442,6 +2452,32 @@ select:focus-visible,
   border-radius: var(--radius-sm);
   font-size: 13px;
   font-weight: 600;
+}
+
+.submitted-day-list {
+  text-align: left;
+}
+
+.submitted-day-list-title {
+  margin-bottom: 8px;
+  color: var(--text-main);
+}
+
+.submitted-day-row {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 12px;
+  padding: 7px 0;
+}
+
+.submitted-day-row + .submitted-day-row {
+  border-top: 1px solid var(--border-color);
+}
+
+.submitted-day-row strong {
+  min-width: 0;
+  color: var(--text-main);
+  overflow-wrap: anywhere;
 }
 
 .specified-result-details {

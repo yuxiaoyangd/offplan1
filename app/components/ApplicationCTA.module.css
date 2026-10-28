@@ -1,0 +1,94 @@
+.apply {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 29px 34px;
+  border: 1px solid #d6ddc9;
+  border-radius: 22px;
+  background: #edf1e3;
+  color: #172425;
+  box-shadow: 0 16px 42px -25px rgba(23, 36, 37, .22);
+}
+.copy { display: flex; align-items: center; gap: 17px; min-width: 0; }
+.sketch { width: 90px; height: 100px; flex: 0 0 90px; }
+.copy h2 { margin: 0 0 8px; font-size: 22px; font-weight: 700; letter-spacing: -.04em; line-height: 1.45; }
+.copy p { margin: 0; color: #66735f; font-size: 12px; line-height: 1.8; }
+.applyButton, .submitButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 13px;
+  min-height: 47px;
+  padding: 10px 22px;
+  border: 1px solid #172425;
+  border-radius: 9px;
+  background: #ffb331;
+  color: #172425;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background .15s, transform .15s;
+}
+.applyButton { flex: 0 0 auto; }
+.applyButton:hover, .submitButton:hover:not(:disabled) { background: #ffc455; transform: translateY(-2px); }
+.applyButton:focus-visible, .submitButton:focus-visible, .closeButton:focus-visible { outline: 3px solid #aa6a09; outline-offset: 3px; }
+.submitButton:disabled { cursor: wait; opacity: .7; }
+
+.dialog {
+  width: min(460px, calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  overflow: auto;
+  border: 1px solid #d6ddc9;
+  border-radius: 20px;
+  background: #f8f7f3;
+  color: #172425;
+  box-shadow: 0 22px 75px #17242538;
+  font-family: inherit;
+}
+.dialog::backdrop { background: #17242578; backdrop-filter: blur(4px); }
+.dialogCard { position: relative; padding: 31px; }
+.closeButton { position: absolute; top: 16px; right: 16px; display: grid; width: 32px; height: 32px; place-items: center; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #64715f; font-size: 25px; line-height: 1; cursor: pointer; }
+.closeButton:hover { background: #e9ece0; color: #172425; }
+.closeButton:disabled { cursor: wait; opacity: .5; }
+.dialogTitle { margin: 0 36px 5px 0; font-size: 24px; font-weight: 700; letter-spacing: -.04em; }
+.dialogIntro { margin: 0 0 24px; color: #66735f; font-size: 13px; line-height: 1.7; }
+.form { display: grid; gap: 19px; }
+.field { display: grid; gap: 8px; font-size: 13px; font-weight: 650; }
+.field input { width: 100%; height: 45px; padding: 10px 13px; border: 1px solid #cbd2c0; border-radius: 9px; outline: none; background: #fff; color: #172425; font-size: 14px; font-weight: 400; }
+.field input::placeholder { color: #9ba596; }
+.field input:focus { border-color: #b47b19; box-shadow: 0 0 0 3px #ffb33135; }
+.methods { margin: 0; padding: 0; border: 0; }
+.methods legend { margin-bottom: 9px; padding: 0; font-size: 13px; font-weight: 650; }
+.methodChoices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.methodChoices label { position: relative; cursor: pointer; }
+.methodChoices input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.methodChoices span { display: grid; min-height: 41px; place-items: center; border: 1px solid #cbd2c0; border-radius: 9px; background: #fff; color: #64715f; font-size: 13px; }
+.methodChoices input:checked + span { border-color: #172425; background: #eaf2d2; color: #172425; font-weight: 650; }
+.methodChoices input:focus-visible + span { outline: 3px solid #aa6a09; outline-offset: 2px; }
+.privacyNote { margin: -3px 0 0; color: #75816e; font-size: 11px; line-height: 1.5; }
+.error { margin: -5px 0 0; color: #a63726; font-size: 12px; line-height: 1.6; }
+.submitButton { width: 100%; margin-top: 1px; }
+.success { padding: 16px 0 4px; text-align: center; }
+.successMark { display: inline-grid; width: 54px; height: 54px; place-items: center; margin-bottom: 12px; border: 1.5px solid #172425; border-radius: 50%; background: #d9ef83; font-size: 27px; }
+.success h2 { margin: 0 0 8px; font-size: 23px; }
+.success h2:focus { outline: none; }
+.success p { margin: 0 0 24px; color: #66735f; font-size: 13px; line-height: 1.7; }
+
+@media (max-width: 700px) {
+  .apply { align-items: flex-start; flex-direction: column; gap: 15px; padding: 21px 22px; border-radius: 16px; }
+  .sketch { width: 65px; height: 73px; flex-basis: 65px; }
+  .copy { gap: 13px; }
+  .copy h2 { margin-bottom: 4px; font-size: 19px; }
+  .copy p { font-size: 11px; }
+  .applyButton { align-self: stretch; min-height: 43px; }
+  .dialogCard { padding: 27px 22px; }
+  .dialogTitle { font-size: 21px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .applyButton, .submitButton { transition: none; }
+  .applyButton:hover, .submitButton:hover:not(:disabled) { transform: none; }
+}

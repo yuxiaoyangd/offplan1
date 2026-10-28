@@ -1,69 +1,52 @@
-"use client";
+import type { Metadata } from "next";
+import ApplicationCTA, { ApplicationProvider, HeaderApplicationButton } from "./components/ApplicationCTA";
+import BrandVideo from "./components/BrandVideo";
+import CopyEmail from "./components/CopyEmail";
+import WorkflowShowcase from "./components/WorkflowShowcase";
+import styles from "./page.module.css";
 
-import Link from "next/link";
-import { useEffect, useState } from "react";
-import Loading from "./loading";
-
-const weekDays = ["日", "一", "二", "三", "四", "五", "六"];
-const INITIAL_DATE = new Date(2000, 0, 1, 0, 0, 0);
+export const metadata: Metadata = {
+  title: "offplan｜员工排休与团队排班工具",
+  description: "offplan 是面向团队的在线排休与排班工具：一键导入员工名单，员工通过链接自主选择上班时段和休息日期，完成后导出排班表。申请专属排休系统。",
+  keywords: ["offplan", "员工排休", "团队排班", "在线排班", "排休系统", "排班工具", "员工自主排休", "排班表导出"],
+  openGraph: {
+    title: "offplan｜员工排休与团队排班工具",
+    description: "一键导入员工名单，员工自主选择排休，完成后导出排班表。用 offplan 管理团队排休。",
+    siteName: "offplan",
+    locale: "zh_CN",
+    type: "website",
+  },
+};
 
 export default function HomePage() {
-  const [today, setToday] = useState(() => INITIAL_DATE);
-  const [ready, setReady] = useState(false);
-  useEffect(() => {
-    setToday(new Date());
-    setReady(true);
-    const timer = window.setInterval(() => setToday(new Date()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  if (!ready) return <Loading />;
-
-  const month = today.getMonth();
-  const date = today.getDate();
-  const firstDay = new Date(today.getFullYear(), month, 1).getDay();
-  const daysInMonth = new Date(today.getFullYear(), month + 1, 0).getDate();
-  const calendarDays = [...Array(firstDay).fill(null), ...Array.from({ length: daysInMonth }, (_, index) => index + 1)];
-
   return (
-    <main className="homepage-intro">
-      <div className="homepage-workspace">
-        <header className="homepage-header">
-          <div className="homepage-brand">
-            <span className="homepage-brand-dot" />
-            <span>工作台</span>
-          </div>
-          <div className="homepage-clock" aria-label="实时时间">
-            <strong>{today.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })}</strong>
-          </div>
-        </header>
+    <main className={styles.page}>
+      <ApplicationProvider>
+        <div className={styles.shell}>
+          <header className={styles.header}>
+            <h1 className={styles.wordmark}>offplan</h1>
+            <HeaderApplicationButton />
+          </header>
 
-        <section className="homepage-hero" aria-label="今日问候">
-          <div className="homepage-hero-copy">
-            <p className="homepage-kicker">{today.getHours() < 12 ? "早上好" : today.getHours() < 18 ? "下午好" : "晚上好"}</p>
-            <h1>今天的工作怎么样？</h1>
-            <p className="homepage-description">先看看今天的安排，再出发。愿你一路顺利，平安收工。</p>
-            <Link className="homepage-feedback-link" href="/feedback">
-              <span className="homepage-feedback-icon">☺</span>
-              <span><strong>骑手投诉或建议</strong><small>可匿名提交建议、投诉或满意度评价</small></span>
-              <span className="homepage-feedback-arrow">›</span>
-            </Link>
+          <div className={styles.content}>
+            <BrandVideo />
+            <div className={styles.contentSection}>
+              <WorkflowShowcase />
+            </div>
+            <div className={styles.contentSection}>
+              <ApplicationCTA />
+            </div>
           </div>
-        </section>
 
-        <section className="homepage-calendar" aria-label="实时日历">
-          <div className="homepage-calendar-heading">
-            <div><p>实时日历</p><h2>{today.getFullYear()}年 {month + 1}月</h2></div>
-            <span className="homepage-today-label">今天 {month + 1}/{date}</span>
-          </div>
-          <div className="homepage-calendar-grid">
-            {weekDays.map((day) => <span className="homepage-weekday" key={day}>{day}</span>)}
-            {calendarDays.map((day, index) => (
-              <span className={`homepage-calendar-day${day === date ? " is-today" : ""}`} key={`${day ?? "empty"}-${index}`}>{day}</span>
-            ))}
-          </div>
-        </section>
-      </div>
+          <footer className={styles.footer}>
+            <div className={styles.footerBrand}>
+              <span>offplan</span>
+              <span>简单安排，从容工作。</span>
+            </div>
+            <CopyEmail />
+          </footer>
+        </div>
+      </ApplicationProvider>
     </main>
   );
 }

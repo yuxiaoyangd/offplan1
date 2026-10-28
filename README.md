@@ -51,6 +51,11 @@ CLOUD_RUN_XLS_EXPORT_KEY=可选，启用 Cloud Run 共享密钥后填写
 - 每个小队拥有独立的每日排休名额。
 - 导入时会把当周原始 Excel 保存到 Supabase Storage，供兼容导出使用。
 - 已有数据库请先在 Supabase SQL Editor 执行 `supabase/xls_export_migration.sql`。
+- 更新已有数据库的“清空排班”功能时，在 Supabase SQL Editor 执行 `supabase/clear_rider_schedules_reset_preference_migration.sql`；此脚本只替换函数，不清理现有数据。
+- 更新已有数据库的“套用指定时段”功能时，在 Supabase SQL Editor 执行 `supabase/bulk_apply_slot_allow_unselectable_migration.sql`；此脚本只替换函数，不清理现有数据。
+- 更新已有数据库的“时段与排班规则”保存功能时，在 Supabase SQL Editor 执行 `supabase/save_week_slot_rules_migration.sql`；此脚本只新增函数，不清理现有数据。
+- 确保“自动补全排班”仍按默认时段补全时，在 Supabase SQL Editor 执行 `supabase/complete_week_schedules_default_slots_migration.sql`；此脚本只替换函数，不清理现有数据。
+- 为避免“套用未开启时段”后自动补入多余时段，随后执行 `supabase/complete_week_schedules_count_admin_slots_migration.sql`；此脚本只替换自动补全函数，不清理现有数据。
 
 ## 5. 当前 MVP 约束
 

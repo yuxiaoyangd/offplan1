@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { buildDaysFromRange, formatWeekRange } from "@/lib/date";
@@ -16,6 +16,39 @@ type RpcResult = {
   success?: boolean;
   message?: string;
 };
+
+type SubmittedDay = {
+  key: string;
+  label: string;
+  rest: boolean;
+  slotIds: string[];
+  slotNames: string[];
+};
+
+function SubmittedScheduleSummary({ days, uniformSlotNames }: {
+  days: SubmittedDay[];
+  uniformSlotNames: string[] | null;
+}) {
+  if (days.every((day) => !day.rest && day.slotIds.length === 0)) {
+    return <div className="random-shift-summary">暂无出勤安排</div>;
+  }
+
+  if (uniformSlotNames) {
+    return <div className="random-shift-summary">出勤时段：{uniformSlotNames.join("、")}</div>;
+  }
+
+  return (
+    <div className="random-shift-summary submitted-day-list">
+      <div className="submitted-day-list-title">每日出勤安排</div>
+      {days.map((day) => (
+        <div className="submitted-day-row" key={day.key}>
+          <span>{day.label}</span>
+          <strong>{day.rest ? "休息" : day.slotNames.join("、") || "未安排"}</strong>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function isNetworkFailure(message: string, status?: number) {
   return status === 0 || /failed to fetch|fetch failed|load failed|network ?error|network request failed/i.test(message);
@@ -109,6 +142,7 @@ export default function WeekSchedulePage() {
   const [uniformSlotIds, setUniformSlotIds] = useState<string[]>([]);
   const [schedulesLoaded, setSchedulesLoaded] = useState(false);
   const [initializedRiderId, setInitializedRiderId] = useState<string | null>(null);
+  const previousPreferenceMode = useRef<RiderRow["rest_preference_mode"]>(null);
 
   const selectableSlots = useMemo(
     () => allSlots.filter((slot) => slot.is_selectable && slot.is_active).sort((a, b) => a.sort_order - b.sort_order),
@@ -127,6 +161,30 @@ export default function WeekSchedulePage() {
     () => Object.fromEntries(allSlots.map((slot) => [slot.id, slot])),
     [allSlots],
   );
+  const submittedDays = useMemo<SubmittedDay[]>(() => weekDays.map((day) => {
+    const daySchedules = schedules.filter((entry) => entry.work_date === day.key);
+    const slotIds = [...new Set(daySchedules
+      .filter((entry) => entry.slot_id !== null && entry.is_selected === true)
+      .map((entry) => entry.slot_id!))]
+      .sort((a, b) => (slotMap[a]?.sort_order ?? 0) - (slotMap[b]?.sort_order ?? 0));
+    return {
+      key: day.key,
+      label: `${day.weekdayLabel} · ${day.shortDate}`,
+      rest: daySchedules.some((entry) => entry.slot_id === null),
+      slotIds,
+      slotNames: slotIds.map((id) => slotMap[id]?.name ?? "未知时段"),
+    };
+  }), [weekDays, schedules, slotMap]);
+  const uniformSubmittedSlotNames = useMemo(() => {
+    const workDays = submittedDays.filter((day) => !day.rest);
+    const first = workDays[0];
+    if (!first?.slotIds.length || submittedDays.some((day) => !day.rest && day.slotIds.length === 0)) return null;
+    return workDays.every((day) =>
+      day.slotIds.length === first.slotIds.length
+      && day.slotIds.every((id, index) => id === first.slotIds[index]),
+    ) ? first.slotNames : null;
+  }, [submittedDays]);
+  const hasActualSchedule = schedules.some((entry) => entry.slot_id === null || entry.is_selected === true);
 
   useEffect(() => {
     async function loadWeek() {
@@ -258,6 +316,24 @@ export default function WeekSchedulePage() {
     weekDays,
   ]);
 
+  useEffect(() => {
+    const mode = rider?.rest_preference_mode ?? null;
+    if (previousPreferenceMode.current && !mode) {
+      setDraftMode(null);
+      setSelectedRestDate("");
+      setUniformSlotIds([]);
+      setInitializedRiderId(null);
+    }
+    previousPreferenceMode.current = mode;
+  }, [rider?.rest_preference_mode]);
+
+  useEffect(() => {
+    if (!schedulesLoaded || rider?.rest_preference_mode || !hasActualSchedule) return;
+    setDraftMode(null);
+    setConfirmRandom(false);
+    setConfirmSpecified(false);
+  }, [schedulesLoaded, rider?.rest_preference_mode, hasActualSchedule]);
+
   async function refreshRiderSchedules() {
     if (!week || !rider?.rider_id) return;
     const [schedulesRes, riderRes] = await Promise.all([
@@ -276,6 +352,57 @@ export default function WeekSchedulePage() {
     }
     setSchedulesLoaded(true);
   }
+
+  useEffect(() => {
+    if (!week?.id || !rider?.rider_id) return;
+    const riderId = rider.rider_id;
+    let refreshTimer: number | null = null;
+    const scheduleRefresh = () => {
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => {
+        refreshTimer = null;
+        void refreshRiderSchedules();
+      }, 300);
+    };
+    const channel = supabase
+      .channel(`rider-preference-${week.id}-${riderId}`)
+      .on("postgres_changes", {
+        event: "UPDATE",
+        schema: "public",
+        table: "riders",
+        filter: `week_id=eq.${week.id}`,
+      }, (payload) => {
+        if ((payload.new as { rider_id?: string }).rider_id === riderId) {
+          scheduleRefresh();
+        }
+      })
+      .on("postgres_changes", {
+        event: "INSERT",
+        schema: "public",
+        table: "rider_schedules",
+        filter: `rider_id=eq.${riderId}`,
+      }, scheduleRefresh)
+      .on("postgres_changes", {
+        event: "UPDATE",
+        schema: "public",
+        table: "rider_schedules",
+        filter: `rider_id=eq.${riderId}`,
+      }, scheduleRefresh)
+      .on("postgres_changes", {
+        event: "DELETE",
+        schema: "public",
+        table: "rider_schedules",
+      }, (payload) => {
+        const deletedRiderId = (payload.old as { rider_id?: string }).rider_id;
+        if (!deletedRiderId || deletedRiderId === riderId) scheduleRefresh();
+      })
+      .subscribe();
+
+    return () => {
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      void supabase.removeChannel(channel);
+    };
+  }, [week?.id, rider?.rider_id]);
 
   async function saveEmployeeName() {
     const trimmed = draftName.trim();
@@ -430,12 +557,14 @@ export default function WeekSchedulePage() {
   }
 
   const mode = rider?.rest_preference_mode;
+  const showAdminScheduleResult = Boolean(rider && schedulesLoaded && !mode && hasActualSchedule);
   const specifiedRestDay = weekDays.find((day) => day.key === existingRestDate);
   const selectedRestDay = weekDays.find((day) => day.key === selectedRestDate);
   const hasFixedSubmit = Boolean(
     rider
     && schedulesLoaded
     && !mode
+    && !hasActualSchedule
     && (
       draftMode === "random"
       || draftMode === "specified"
@@ -445,7 +574,7 @@ export default function WeekSchedulePage() {
 
   return (
     <main className={`page-container employee-page ${hasFixedSubmit ? "with-fixed-submit" : ""}`}>
-      {confirmRandom ? (
+      {confirmRandom && !showAdminScheduleResult ? (
         <div className="confirm-overlay">
           <section className="confirm-card employee-confirm-card">
             <h3>确认选择随机排休？</h3>
@@ -460,7 +589,7 @@ export default function WeekSchedulePage() {
         </div>
       ) : null}
 
-      {confirmSpecified ? (
+      {confirmSpecified && !showAdminScheduleResult ? (
         <div className="confirm-overlay">
           <section className="confirm-card employee-confirm-card">
             <h3>确认提交指定排休？</h3>
@@ -493,8 +622,8 @@ export default function WeekSchedulePage() {
       {showNameGate ? (
         <div className="welcome-overlay">
           <section className="welcome-card">
-            <h2>填写姓名或骑手 ID</h2>
-            <p>请输入骑手名单中的姓名；如有同名，请输入骑手 ID。</p>
+            <h2>填写姓名或 ID</h2>
+            <p>如有同名需输入骑手 ID</p>
             <div className="input-group">
               <input
                 className="clean-input"
@@ -528,10 +657,10 @@ export default function WeekSchedulePage() {
           <section className="random-result">
             <div className="result-mark">已提交</div>
             <h2>已选择随机排休</h2>
-            <p>将随机安排一天休息。</p>
-            <div className="random-shift-summary">
-              出勤时段：{uniformSlotIds.map((id) => slotMap[id]?.name).filter(Boolean).join("、") || "已提交"}
-            </div>
+            <p>{existingRestDate && specifiedRestDay
+              ? `已安排 ${specifiedRestDay.weekdayLabel} · ${specifiedRestDay.shortDate} 休息。`
+              : "将随机安排一天休息。"}</p>
+            <SubmittedScheduleSummary days={submittedDays} uniformSlotNames={uniformSubmittedSlotNames} />
             <div className="submitted-note">已选择随机排休</div>
           </section>
           {week.show_feedback_entry ? <Link className="employee-feedback-link" href="/feedback">
@@ -559,11 +688,8 @@ export default function WeekSchedulePage() {
                     : ""}
                 </strong>
               </div>
-              <div>
-                <span>出勤时段</span>
-                <strong>{uniformSlotIds.map((id) => slotMap[id]?.name).filter(Boolean).join("、") || "已选择"}</strong>
-              </div>
             </div>
+            <SubmittedScheduleSummary days={submittedDays} uniformSlotNames={uniformSubmittedSlotNames} />
             <div className="submitted-note">排休意愿已确认</div>
           </section>
           {week.show_feedback_entry ? <Link className="employee-feedback-link" href="/feedback">
@@ -576,7 +702,33 @@ export default function WeekSchedulePage() {
         </>
       ) : null}
 
-      {rider && schedulesLoaded && !mode && !draftMode ? (
+      {showAdminScheduleResult ? (
+        <>
+          <section className="random-result specified-result">
+            <div className="result-mark">当前排班</div>
+            <h2>本周排班结果</h2>
+            <div className="specified-result-details">
+              <div>
+                <span>排休日</span>
+                <strong>{specifiedRestDay
+                  ? `${specifiedRestDay.weekdayLabel} · ${specifiedRestDay.shortDate}`
+                  : "待安排"}</strong>
+              </div>
+            </div>
+            <SubmittedScheduleSummary days={submittedDays} uniformSlotNames={uniformSubmittedSlotNames} />
+            <div className="submitted-note">{existingRestDate ? "排休日已安排" : "排休待安排"}</div>
+          </section>
+          {week.show_feedback_entry ? <Link className="employee-feedback-link" href="/feedback">
+            <svg className="employee-feedback-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="3" y="5" width="18" height="14" rx="2" />
+              <polyline points="3 7 12 13 21 7" />
+            </svg>
+            骑手投诉或建议
+          </Link> : null}
+        </>
+      ) : null}
+
+      {rider && schedulesLoaded && !mode && !hasActualSchedule && !draftMode ? (
         <section className="random-choice-panel">
           <h2>是否随机排休？</h2>
           <p>选择随机排休，随机安排一天休息</p>
@@ -591,7 +743,7 @@ export default function WeekSchedulePage() {
         </section>
       ) : null}
 
-      {rider && schedulesLoaded && !mode && draftMode === "random" ? (
+      {rider && schedulesLoaded && !mode && !hasActualSchedule && draftMode === "random" ? (
         <section className="specified-workflow">
           <div className="workflow-section">
             <div className="section-title-row">
@@ -633,7 +785,7 @@ export default function WeekSchedulePage() {
         </section>
       ) : null}
 
-      {rider && schedulesLoaded && !mode && draftMode === "specified" ? (
+      {rider && schedulesLoaded && !mode && !hasActualSchedule && draftMode === "specified" ? (
         <section className="specified-workflow">
           <div className="workflow-section">
             <div className="section-title-row">
