@@ -204,30 +204,27 @@ export default function WorkflowShowcase() {
   const [selection, setSelection] = useState({ index: 0, replay: 0 });
   const [inView, setInView] = useState(false);
   const [visible, setVisible] = useState(true);
-  const [reducedMotion, setReducedMotion] = useState(true);
   const scenePaused = !inView || !visible;
-  const rotationPaused = scenePaused || reducedMotion;
 
   useEffect(() => {
-    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const updateMotion = () => setReducedMotion(media.matches);
     const updateVisibility = () => setVisible(!document.hidden);
-    updateMotion();
     updateVisibility();
-    media.addEventListener("change", updateMotion);
     document.addEventListener("visibilitychange", updateVisibility);
     const root = rootRef.current;
-    const observer = new IntersectionObserver(([entry]) => setInView(entry.isIntersecting), { threshold: 0.2 });
-    if (root) observer.observe(root);
+    const observer = new IntersectionObserver(([entry]) => setInView(entry.isIntersecting), { threshold: 0.01, rootMargin: "0px 0px 120px 0px" });
+    if (root) {
+      const bounds = root.getBoundingClientRect();
+      setInView(bounds.bottom > 0 && bounds.top < window.innerHeight + 120);
+      observer.observe(root);
+    }
     return () => {
-      media.removeEventListener("change", updateMotion);
       document.removeEventListener("visibilitychange", updateVisibility);
       observer.disconnect();
     };
   }, []);
 
   useEffect(() => {
-    if (rotationPaused) return;
+    if (scenePaused) return;
     let frame: number;
     let previous = performance.now();
     const tick = (now: number) => {
@@ -242,7 +239,7 @@ export default function WorkflowShowcase() {
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [rotationPaused]);
+  }, [scenePaused]);
 
   function selectStep(index: number) {
     elapsedRef.current = 0;

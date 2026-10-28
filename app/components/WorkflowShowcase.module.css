@@ -206,10 +206,3 @@
   .tabs { gap: 6px; margin-bottom: 9px; }
   .tab { min-height: 48px; padding: 14px 3px; border-radius: 9px; font-size: 11px; white-space: nowrap; }
 }
-
-@media (prefers-reduced-motion: reduce) {
-  .showcase .illustration *, .showcase .copy { animation: none; }
-  .tab { transition: none; }
-  .progressFill { display: none; }
-  .tab[aria-selected="true"] { background: #e5efce; }
-}

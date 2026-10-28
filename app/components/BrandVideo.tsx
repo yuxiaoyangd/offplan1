@@ -24,32 +24,26 @@ export default function BrandVideo() {
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
-    manuallyPaused.current = motion.matches;
-    let inView = false;
+    const bounds = video.getBoundingClientRect();
+    let inView = bounds.bottom > 0 && bounds.top < window.innerHeight;
 
     const syncPlayback = () => {
       if (inView && !document.hidden && !manuallyPaused.current) {
-        void video.play().catch(() => setPlaying(false));
+        if (video.paused) void video.play().catch(() => setPlaying(false));
       } else {
         video.pause();
       }
     };
-    const onMotionChange = () => {
-      manuallyPaused.current = motion.matches;
-      syncPlayback();
-    };
     const observer = new IntersectionObserver(([entry]) => {
       inView = entry.isIntersecting;
       syncPlayback();
-    }, { threshold: 0.15 });
+    }, { threshold: 0.01 });
     observer.observe(video);
     document.addEventListener("visibilitychange", syncPlayback);
-    motion.addEventListener("change", onMotionChange);
+    syncPlayback();
     return () => {
       observer.disconnect();
       document.removeEventListener("visibilitychange", syncPlayback);
-      motion.removeEventListener("change", onMotionChange);
       video.pause();
     };
   }, []);
@@ -86,7 +80,8 @@ export default function BrandVideo() {
           className={styles.video}
           src={SOURCE}
           poster="/videos/offplan-poster.jpg"
-          preload="metadata"
+          preload="auto"
+          autoPlay
           muted
           loop
           playsInline
