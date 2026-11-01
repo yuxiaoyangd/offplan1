@@ -848,6 +848,10 @@ export default function WeekSchedulePage() {
                 );
               })}
             </div>
+            <p className="rest-quota-notice">
+              <span className="rest-quota-notice-icon" aria-hidden="true">!</span>
+              <span><strong>名额已满？</strong>如有特殊情况，请提前联系小队长或站长。</span>
+            </p>
           </div>
 
           <div className="fixed-submit-bar">
