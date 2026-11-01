@@ -11,6 +11,7 @@ const STORAGE_KEY = "offplan.employeeInfo";
 const CACHE_DURATION_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_WEEKDAY_LIMIT = 5;
 const DEFAULT_WEEKEND_LIMIT = 2;
+const SHOW_REST_MODE_CHOICE = false;
 
 type RpcResult = {
   success?: boolean;
@@ -557,6 +558,7 @@ export default function WeekSchedulePage() {
   }
 
   const mode = rider?.rest_preference_mode;
+  const activeDraftMode = draftMode ?? (SHOW_REST_MODE_CHOICE ? null : "specified");
   const showAdminScheduleResult = Boolean(rider && schedulesLoaded && !mode && hasActualSchedule);
   const specifiedRestDay = weekDays.find((day) => day.key === existingRestDate);
   const selectedRestDay = weekDays.find((day) => day.key === selectedRestDate);
@@ -565,10 +567,7 @@ export default function WeekSchedulePage() {
     && schedulesLoaded
     && !mode
     && !hasActualSchedule
-    && (
-      draftMode === "random"
-      || draftMode === "specified"
-    ),
+    && activeDraftMode !== null,
   );
   const noRestQuota = Object.keys(limits).length > 0 && Object.values(limits).every((v) => v === 0);
 
@@ -728,7 +727,7 @@ export default function WeekSchedulePage() {
         </>
       ) : null}
 
-      {rider && schedulesLoaded && !mode && !hasActualSchedule && !draftMode ? (
+      {SHOW_REST_MODE_CHOICE && rider && schedulesLoaded && !mode && !hasActualSchedule && !activeDraftMode ? (
         <section className="random-choice-panel">
           <h2>是否随机排休？</h2>
           <p>选择随机排休，随机安排一天休息</p>
@@ -743,7 +742,7 @@ export default function WeekSchedulePage() {
         </section>
       ) : null}
 
-      {rider && schedulesLoaded && !mode && !hasActualSchedule && draftMode === "random" ? (
+      {rider && schedulesLoaded && !mode && !hasActualSchedule && activeDraftMode === "random" ? (
         <section className="specified-workflow">
           <div className="workflow-section">
             <div className="section-title-row">
@@ -785,7 +784,7 @@ export default function WeekSchedulePage() {
         </section>
       ) : null}
 
-      {rider && schedulesLoaded && !mode && !hasActualSchedule && draftMode === "specified" ? (
+      {rider && schedulesLoaded && !mode && !hasActualSchedule && activeDraftMode === "specified" ? (
         <section className="specified-workflow">
           <div className="workflow-section">
             <div className="section-title-row">
@@ -848,10 +847,6 @@ export default function WeekSchedulePage() {
                 );
               })}
             </div>
-            <p className="rest-quota-notice">
-              <span className="rest-quota-notice-icon" aria-hidden="true">!</span>
-              <span><strong>名额已满？</strong>如有特殊情况，请提前联系小队长或站长。</span>
-            </p>
           </div>
 
           <div className="fixed-submit-bar">
