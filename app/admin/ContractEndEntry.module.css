@@ -1,3 +1,12 @@
-.link { display: inline-flex; align-items: center; margin-left: 8px; padding: 2px 8px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); color: var(--text-muted); font-size: inherit; font-weight: 400; line-height: 1.4; text-decoration: none; vertical-align: middle; }
-.link:hover { border-color: var(--accent-color); color: var(--text-main); }
+.link { position: relative; display: inline-flex; align-items: center; margin-left: 8px; margin-right: 16px; padding: 2px 8px; border: 1px solid var(--accent-color); border-radius: var(--radius-sm); color: var(--text-muted); font-size: inherit; font-weight: 400; line-height: 1.4; text-decoration: none; vertical-align: middle; }
+.link:hover { border-color: var(--accent-hover); color: var(--text-main); }
 .link:focus-visible { outline: 2px solid var(--accent-hover); outline-offset: 2px; }
+.badge { position: absolute; top: -9px; right: -16px; padding: 1px 5px; border-radius: var(--radius-pill); background: var(--accent-color); color: #422006; font-size: 9px; font-weight: 800; line-height: 1.4; letter-spacing: .04em; animation: badge-breathe 2.8s ease-in-out infinite; }
+
+@keyframes badge-breathe {
+  50% { transform: translateY(-1px); box-shadow: 0 2px 7px rgba(245, 158, 11, .28); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .badge { animation: none; }
+}
