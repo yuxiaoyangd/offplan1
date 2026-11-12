@@ -6,6 +6,7 @@ import * as XLSX from "xlsx";
 import { buildDaysFromRange, formatWeekRange, getWeekStart, formatDateKey } from "@/lib/date";
 import { supabase } from "@/lib/supabase";
 import ImportWeekDialog from "./ImportWeekDialog";
+import ContractEndEntry from "./ContractEndEntry";
 import type {
   ExportXlsData,
   RiderRow,
@@ -1336,7 +1337,7 @@ export default function AdminPage() {
       ) : null}
       <header className="page-header">
         <h1>后台管理</h1>
-        <p>排班周管理 · 排班总览</p>
+        <p>排班周管理 · 排班总览 <ContractEndEntry /></p>
       </header>
       {message ? <div className="toast-pill">{message}</div> : null}
 
