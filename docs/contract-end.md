@@ -4,7 +4,7 @@
 
 在 Supabase SQL Editor 依次执行 `supabase/contract_end_migration.sql`、`supabase/contract_end_custom_reasons_migration.sql` 和 `supabase/contract_end_multiselect_migration.sql`。已经执行过的脚本无需重复执行。这些脚本不修改排班表。
 
-完成后打开 `/admin`，通过“断签统计”入口进入独立管理页。新建表单带入六项默认原因，可以增删和编辑。表单默认关闭；开启后复制链接发给骑手。要编辑原因，先关闭收集。骑手可多选断签原因；选中“其他原因”时必须填写具体说明。
+完成后打开 `/admin`，通过“断签统计”入口进入独立管理页。新建表单带入六项默认原因，可以增删和编辑。表单默认关闭，开启或关闭收集时都可以编辑原因和复制链接。骑手可在收集开启时提交，可多选断签原因，选中“其他原因”时必须填写具体说明。
 
 删除按钮始终可见。确认删除后，该表单和该批次全部提交记录会一并删除。
 

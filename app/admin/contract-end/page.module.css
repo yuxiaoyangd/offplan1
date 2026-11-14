@@ -25,39 +25,44 @@
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
 .formCard { display: grid; align-content: start; gap: 14px; min-width: 0; padding: 18px; border: 1px solid #e2e8f0; border-radius: 13px; background: #fff; }
 .selectedCard { border-color: #e4a116; box-shadow: 0 0 0 2px rgba(245, 158, 11, .12); }
-.cardSelect { display: grid; gap: 14px; width: 100%; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; text-align: left; }
+.cardHeader { --status-row-height: 24px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 12px; }
+.cardHeader > .deleteButton { min-height: var(--status-row-height); padding: 2px 8px; border-radius: 6px; font-size: 12px; line-height: 1.2; }
+.cardSelect { display: grid; grid-template-rows: var(--status-row-height) auto; align-items: center; justify-items: start; gap: 14px; width: 100%; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; text-align: left; }
 .cardSelect:focus-visible { outline: 2px solid #e4a116; outline-offset: 5px; }
-.cardTop { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .openBadge, .closedBadge { padding: 4px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
 .openBadge { background: #e8f5e9; color: #27833c; }
 .closedBadge { background: #eef2f6; color: #64748b; }
-.cardTitle { font-size: 17px; font-weight: 700; }
-.cardActions { margin-top: auto; }
+.cardTitle { font-size: 17px; font-weight: 700; overflow-wrap: anywhere; }
+.cardActions { gap: 8px; margin-top: auto; }
+.cardActions > button { padding-inline: 8px; }
 .resultsSection { margin-top: 24px; padding-top: 24px; border-top: 1px solid #e2e8f0; }
-.resultsHeading, .recordsHeading { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.resultsHeading { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
 .resultsHeading h2 { margin: 3px 0 0; font-size: 21px; }
 .summaryGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
 .summaryItem { display: grid; gap: 6px; padding: 16px; border: 1px solid #e2e8f0; border-radius: 11px; background: #f8fafc; }
 .summaryItem span { color: #64748b; font-size: 12px; }
 .summaryItem strong { font-size: 23px; }
 .reasonSummary { margin-top: 22px; padding: 18px; border: 1px solid #e2e8f0; border-radius: 11px; }
-.reasonSummary h3, .recordsHeading h3 { margin: 0 0 12px; font-size: 16px; }
+.reasonSummary h3 { margin: 0 0 12px; font-size: 16px; }
 .reasonRow { display: grid; grid-template-columns: minmax(90px, 140px) minmax(0, 1fr) 30px; align-items: center; gap: 12px; margin-top: 10px; font-size: 13px; }
 .reasonRow strong { text-align: right; }
 .reasonTrack { height: 9px; overflow: hidden; border-radius: 999px; background: #eef2f6; }
 .reasonTrack span { height: 100%; display: block; border-radius: inherit; background: #f4aa18; }
-.recordsHeading { margin-top: 26px; }
-.recordsHeading span { color: #94a3b8; font-size: 12px; }
+.recordsHeading { margin: 26px 0 12px; }
+.recordsHeading h3 { margin: 0; font-size: 16px; }
 .tableWrap { overflow-x: auto; }
 .recordsTable { width: 100%; border-collapse: collapse; font-size: 13px; text-align: left; }
 .recordsTable th, .recordsTable td { padding: 12px 10px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
 .recordsTable th { color: #64748b; font-weight: 600; white-space: nowrap; }
-.recordsTable td:first-child, .recordsTable td:nth-child(3) { white-space: nowrap; }
+.recordsTable td:nth-child(-n+2), .recordsTable td:nth-child(4) { white-space: nowrap; }
 .recordsTable td:last-child { min-width: 180px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .overlay { position: fixed; z-index: 200; inset: 0; display: grid; place-items: center; padding: 16px; background: rgba(23, 32, 51, .45); }
 .dialog { width: min(100%, 520px); max-height: 90svh; display: grid; gap: 18px; overflow-y: auto; padding: 24px; border-radius: 16px; background: #fff; box-shadow: 0 20px 70px rgba(23, 32, 51, .22); }
 .dialog h2 { margin: 0; font-size: 20px; }
 .dialog p { margin: -10px 0 0; color: #64748b; font-size: 13px; line-height: 1.6; }
+.exportDialog { width: min(calc(100% - 32px), 520px); max-width: none; border: 0; color: inherit; }
+.exportDialog:not([open]) { display: none; }
+.exportDialog::backdrop { background: rgba(23, 32, 51, .45); }
 .dialog > label { display: grid; gap: 7px; font-size: 14px; font-weight: 600; }
 .dialog > label input { width: 100%; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; outline: none; color: #1f304d; font: inherit; font-weight: 400; }
 .dialog input:focus { border-color: #e4a116; box-shadow: 0 0 0 3px rgba(245, 158, 11, .14); }
