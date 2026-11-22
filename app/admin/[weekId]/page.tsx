@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { buildDaysFromRange, formatWeekRange, getWeekStart, formatDateKey } from "@/lib/date";
+import { calculateRestQuotas, MAX_TEAM_DAILY_REST } from "@/lib/rest-quota";
 import { supabase } from "@/lib/supabase";
 import type {
   RiderRow,
@@ -64,6 +65,7 @@ export default function WeekEditPage() {
   const [schedules, setSchedules] = useState<RiderScheduleRow[]>([]);
   const [limits, setLimits] = useState<Record<string, number>>({});
   const [savedLimits, setSavedLimits] = useState<Record<string, number>>({});
+  const [ridersLoaded, setRidersLoaded] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [showFeedbackPreview, setShowFeedbackPreview] = useState(false);
   const leaveStateRef = useRef({ hasUnsavedChanges: false, message: "" });
@@ -118,6 +120,14 @@ export default function WeekEditPage() {
     return counts;
   }, [riderTeamMap, schedules]);
 
+  const teamRiderCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const rider of riders) {
+      counts.set(rider.team_id, (counts.get(rider.team_id) ?? 0) + 1);
+    }
+    return counts;
+  }, [riders]);
+
   const pendingRandomRestCounts = useMemo(() => {
     const restedRiderIds = new Set(
       schedules.filter((schedule) => schedule.slot_id === null).map((schedule) => schedule.rider_id),
@@ -156,6 +166,7 @@ export default function WeekEditPage() {
       setTeams(teamsRes.data ?? []);
       setRiders(ridersRes.data ?? []);
       setSchedules(schedulesRes.data ?? []);
+      setRidersLoaded(!ridersRes.error && !schedulesRes.error);
       if (limitsRes.data) {
         const loadedLimits = limitsRes.data.reduce<Record<string, number>>((acc, row) => {
           acc[`${row.team_id}:${row.rest_date}`] = row.max_slots;
@@ -390,6 +401,15 @@ export default function WeekEditPage() {
     setSlotRulesDirty(true);
   }
 
+  function fillRestQuotas() {
+    const calculatedLimits = calculateRestQuotas(
+      teams.map((team) => ({ id: team.id, riderCount: teamRiderCounts.get(team.id) ?? 0 })),
+      weekDays,
+      usedLimits,
+    );
+    setLimits((current) => ({ ...current, ...calculatedLimits }));
+  }
+
   async function saveAllLimits() {
     if (!week || savingSection) return;
     setMessage(null);
@@ -583,10 +603,18 @@ export default function WeekEditPage() {
                 ))} · 总计 <strong>{pendingRandomRestCounts.reduce((total, team) => total + team.count, 0)} 人</strong>
               </p>
             </div>
-            <button className={`btn-primary btn-sm config-save-button ${!hasLimitChanges ? "config-save-idle" : ""}`} type="button"
-              onClick={() => { if (hasLimitChanges) void saveAllLimits(); else setMessage("暂无改动"); }} disabled={savingSection !== null}>
-              {savingSection === "limits" ? "保存中..." : "保存名额"}
-            </button>
+            <div className="section-header-actions">
+              <button className="btn-secondary btn-sm" type="button"
+                onClick={fillRestQuotas}
+                disabled={savingSection !== null || !ridersLoaded || riders.length === 0 ||
+                  riders.some((rider) => !teams.some((team) => team.id === rider.team_id))}>
+                一键配置名额
+              </button>
+              <button className={`btn-primary btn-sm config-save-button ${!hasLimitChanges ? "config-save-idle" : ""}`} type="button"
+                onClick={() => { if (hasLimitChanges) void saveAllLimits(); else setMessage("暂无改动"); }} disabled={savingSection !== null}>
+                {savingSection === "limits" ? "保存中..." : "保存名额"}
+              </button>
+            </div>
           </div>
           <div className="quota-table-wrap">
             <table className="quota-table">
@@ -613,7 +641,7 @@ export default function WeekEditPage() {
               </thead>
               <tbody>
                 {teams.map((team) => {
-                  const teamRiderCount = riders.filter((rider) => rider.team_id === team.id).length;
+                  const teamRiderCount = teamRiderCounts.get(team.id) ?? 0;
                   const configuredQuotaCount = weekDays.reduce(
                     (total, day) => total + (limits[`${team.id}:${day.key}`] ?? getDefaultLimit(day.key)),
                     0,
@@ -641,7 +669,7 @@ export default function WeekEditPage() {
                             className="quota-input"
                             type="number"
                             min={used}
-                            max={50}
+                            max={MAX_TEAM_DAILY_REST}
                             value={maxSlots}
                             disabled={savingSection !== null}
                             onChange={(event) => setLimits((current) => ({
